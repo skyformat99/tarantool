@@ -397,6 +397,17 @@ _ = fiber.create(fn1)
 session_type
 session_type = nil
 
+f1 = fiber.create(function() fiber.sleep(.01) box.error(box.error.ILLEGAL_PARAMS, 'oh my')  end)
+f1:set_joinable(true)
+f1:join()
+-- test double join
+f1:join()
+
+flag = false
+f2 = fiber.create(function() fiber.sleep(.01) flag = true  end)
+fiber.set_joinable(f2, true)
+fiber.join(f2)
+flag
 fiber = nil
 
 test_run:cmd("clear filter")

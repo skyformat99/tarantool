@@ -149,9 +149,6 @@ fiber_attr_getstacksize(struct fiber_attr *fiber_attr)
 }
 
 static void
-fiber_recycle(struct fiber *fiber);
-
-static void
 fiber_destroy(struct cord *cord, struct fiber *f);
 
 /**
@@ -598,7 +595,7 @@ fiber_reset(struct fiber *fiber)
 }
 
 /** Destroy an active fiber and prepare it for reuse. */
-static void
+void
 fiber_recycle(struct fiber *fiber)
 {
 	/* no exceptions are leaking */
