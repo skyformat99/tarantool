@@ -190,8 +190,7 @@ create_test_mem(struct lsregion *region, struct key_def *def)
 	/* Create format */
 	struct key_def *defs[] = { def };
 	struct tuple_format *format = tuple_format_new(&vy_tuple_format_vtab,
-						       defs, def->part_count,
-						       0);
+						       defs, 1, 0);
 	fail_if(format == NULL);
 
 	/* Create format with column mask */
