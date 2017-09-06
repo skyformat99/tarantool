@@ -479,18 +479,6 @@
 */
 #define IS_BIG_INT(X)  (((X)&~(i64)0xffffffff)!=0)
 
-/*
-** The macro unlikely() is a hint that surrounds a boolean
-** expression that is usually false.  Macro likely() surrounds
-** a boolean expression that is usually true.  These hints could,
-** in theory, be used by the compiler to generate better code, but
-** currently they are just comments for human readers.
-*/
-#undef likely /* temporary crutch against redefite warning */
-#undef unlikely /* temporary crutch against redefite warning */
-#define likely(X)    (X)
-#define unlikely(X)  (X)
-
 #include "hash.h"
 #include "parse.h"
 #include <stdio.h>
@@ -609,8 +597,7 @@
 /*
 ** Swap two objects of type TYPE.
 */
-#undef SWAP /* temporary crutch against redefite warning */
-#define SWAP(TYPE,A,B) {TYPE t=A; A=B; B=t;}
+#define SWAP_WITH_TYPE(TYPE,A,B) {TYPE t=A; A=B; B=t;}
 
 /*
 ** Check to see if this machine uses EBCDIC.  (Yes, believe it or

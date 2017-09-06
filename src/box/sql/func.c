@@ -14,7 +14,6 @@
 ** time functions, are implemented separately.)
 */
 #include "sqliteInt.h"
-#include <stdlib.h>
 #include <assert.h>
 #include "vdbeInt.h"
 

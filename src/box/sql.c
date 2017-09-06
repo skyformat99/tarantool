@@ -42,9 +42,6 @@
 #include "sql/tarantoolInt.h"
 #include "sql/vdbeInt.h"
 #undef Index
-#undef likely
-#undef unlikely
-#undef SWAP
 
 #include "index.h"
 #include "info.h"

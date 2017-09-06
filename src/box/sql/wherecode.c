@@ -17,6 +17,7 @@
 ** that actually generate the bulk of the WHERE loop code.  The original where.c
 ** file retains the code that does query planning and analysis.
 */
+#include <trivia/util.h>
 #include "sqliteInt.h"
 #include "whereInt.h"
 
@@ -1479,9 +1480,9 @@ Bitmask sqlite3WhereCodeOneLoopStart(
     if( (nEq<pIdx->nKeyCol && bRev==(pIdx->aSortOrder[nEq]==SQLITE_SO_ASC))
      || (bRev && pIdx->nKeyCol==nEq)
     ){
-      SWAP(WhereTerm *, pRangeEnd, pRangeStart);
-      SWAP(u8, bSeekPastNull, bStopAtNull);
-      SWAP(u8, nBtm, nTop);
+      SWAP_WITH_TYPE(WhereTerm *, pRangeEnd, pRangeStart);
+      SWAP_WITH_TYPE(u8, bSeekPastNull, bStopAtNull);
+      SWAP_WITH_TYPE(u8, nBtm, nTop);
     }
 
     /* Generate code to evaluate all constraint terms using == or IN
