@@ -16,6 +16,7 @@ include_directories(${SRCDIR})
 
 add_definitions(-DSQLITE_MAX_WORKER_THREADS=0)
 add_definitions(-DSQLITE_OMIT_VACUUM=1)
+add_definitions(-DSQLITE_MUTEX_FIBER=1)
 
 set(TEST_DEFINITIONS
     SQLITE_DEBUG=1
@@ -63,8 +64,7 @@ add_library(sql STATIC
     memjournal.c
     mutex.c
     mutex_noop.c
-    mutex_unix.c
-    mutex_w32.c
+    mutex_fiber.c
     notify.c
     os.c
     os_unix.c
