@@ -263,6 +263,10 @@ local function check(test)
     return test.planned == test.total and test.failed == 0
 end
 
+local function io_write(self, ...)
+    io.write(...)
+end
+
 test_mt = {
     __index = {
         test      = test;
@@ -284,6 +288,7 @@ test_mt = {
         is_deeply = is_deeply;
         like      = like;
         unlike    = unlike;
+        io_write  = io_write;
     }
 }
 

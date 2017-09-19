@@ -149,9 +149,9 @@ local function do_test(self, label, func, expect)
             if is_deeply_regex(result, expect) then
                 test:ok(self, label)
             else
-                io.write(string.format('%s: Miscompare\n', label))
-                io.write("Expected: ", json.encode(expect).."\n")
-                io.write("Got     : ", json.encode(result).."\n")
+                test:io_write(string.format('%s: Miscompare\n', label))
+                test:io_write("Expected: ", json.encode(expect).."\n")
+                test:io_write("Got     : ", json.encode(result).."\n")
                 test:fail(label)
             end
         end
