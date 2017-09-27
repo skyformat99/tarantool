@@ -47,6 +47,8 @@ local curl_mt
 --  curl object or raise error()
 --
 
+
+
 local http_new = function(opts)
 
     opts = opts or {}
@@ -65,20 +67,63 @@ local function check_args(self, method)
     end
 end
 
+
+--
+-- According to
+-- https://nodejs.org/api/http.html#http_message_headers
+--
+-- duplicates of special headers are discarded
+-- duplicates of set-cookie are stored in table
+-- duplicates of others headers are concatenated in one string separated by comma
+--
+
+special_headers = {
+    ["age"] = true,
+    ["authorization"] = true,
+    ["content-length"] = true,
+    ["content-type"] = true,
+    ["etag"] = true,
+    ["expires"] = true,
+    ["from"] = true,
+    ["host"] = true,
+    ["if-modified-since"] = true,
+    ["if-unmodified-since"] = true,
+    ["last-modified"] = true,
+    ["location"] = true,
+    ["max-forwards"] = true,
+    ["proxy-authorization"] = true,
+    ["referer"] = true,
+    ["retry-after"] = true,
+    ["user-agent"] = true,
+}
+
 local function parse_list(list)
     local result = {}
     for _,str in pairs(list) do
         if str ~= '' and not string.match(str, "HTTP/%d%.%d %d%d%d") then
-            local h = str:split(': ')
-            local key = string.lower(table.remove(h, 1))
-            local val = table.concat(h)
+            local h = str:split(':', 1)
+            local key = h[1]:lower()
+            local val = string.gsub(h[2], "^%s*(.-)%s*$", "%1")
+q
             local prev_val = result[key]
-            if prev_val == nil then
-                result[key] = val
-            elseif type(prev_val) == 'table' then
-                table.insert(prev_val, val)
-            else
-                result[key] = { prev_val, val }
+            -- pack headers
+            if key == "set-cookie" then
+                if prev_val == nil then
+                    result[key] = {}
+                    table.insert(result[key], val)
+                else
+                    table.insert(prev_val, val)
+                end
+            else if not special_headers[key] then
+                    if prev_val then
+                        result[key] = string.format("%s,%s", prev_val, val)
+                    else
+                        result[key] = val
+                    end
+                else if not prev_val then
+                        result[key] = val
+                    end
+                end
             end
         end
     end

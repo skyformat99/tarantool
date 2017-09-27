@@ -21,10 +21,30 @@ def hello1():
     headers = [('Content-Type', 'application/json')]
     return code, body, headers
 
+def responseCookies():
+    code = "200 OK"
+    body = [b"cookies"]
+    headers = [('Content-Type', 'application/json'), ('Set-Cookie', 'likes=cheese, ham; Expires=today'), ('Set-Cookie', 'age=70')]
+    return code, body, headers
+
+def headers():
+    code = "200 OK"
+    body = [b"cookies"]
+    headers = [('Content-Type', 'application/json'),
+               ('Content-Type', 'application/yaml'),
+               ('Set-Cookie', 'likes=cheese'),
+               ('Set-Cookie', 'age=17'),
+               ('my_header', 'value1'),
+               ('my_header', 'value2'),
+               ]
+    return code, body, headers
+
 paths = {
         "/": hello,
         "/abc": hello1,
         "/absent": absent,
+        "/cookies": responseCookies,
+        "/headers": headers,
         }
 
 def read_handle(env, response):
