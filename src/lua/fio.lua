@@ -262,4 +262,23 @@ fio.chdir = function(path)
     return ffi.C.chdir(path) == 0
 end
 
+fio.listdir = function(path)
+    if path == nil or type(path) ~= 'string' then
+        return nil
+    end
+    local str = internal.listdir(path)
+    if str == nil then
+        return nil
+    end
+    local t = {}
+    if str == "" then
+        return t
+    end
+    local names = string.split(str, "\n")
+    for i, name in ipairs(names) do
+        table.insert(t, name)
+    end
+    return t
+end
+
 return fio

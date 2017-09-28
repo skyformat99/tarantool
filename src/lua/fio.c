@@ -508,6 +508,24 @@ usage:
 }
 
 static int
+lbox_fio_listdir(struct lua_State *L) {
+	const char *pathname;
+	if (lua_gettop(L) < 1) {
+		luaL_error(L, "Usage: fio.listdir(pathname)");
+	}
+	pathname = lua_tostring(L, 1);
+	char *buf;
+	if (coio_readdir(pathname, &buf) >= 0) {
+		lua_pushstring(L, buf);
+		free(buf);
+	} else {
+		lua_pushnil(L);
+	}
+	return 1;
+}
+
+
+static int
 lbox_fio_glob(struct lua_State *L)
 {
 	const char *pattern;
@@ -716,6 +734,7 @@ tarantool_lua_fio_init(struct lua_State *L)
 		{ "ftruncate",		lbox_fio_ftruncate		},
 		{ "fsync",		lbox_fio_fsync			},
 		{ "fdatasync",		lbox_fio_fdatasync		},
+		{ "listdir",		lbox_fio_listdir		},
 		{ "fstat",		lbox_fio_fstat			},
 		{ NULL,			NULL				}
 	};

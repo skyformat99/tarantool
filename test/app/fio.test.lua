@@ -163,3 +163,14 @@ fio.chdir('/')
 fio.cwd()
 fio.chdir(old_cwd)
 fio.cwd() == old_cwd
+
+-- listdir
+tmpdir = fio.tempdir()
+dir3 = fio.pathjoin(tmpdir, "dir3")
+fio.mkdir(dir3)
+fio.mkdir(fio.pathjoin(dir3, "1"))
+fio.mkdir(fio.pathjoin(dir3, "2"))
+fio.mkdir(fio.pathjoin(dir3, "3"))
+ls = fio.listdir(dir3)
+table.sort(ls, function(a, b) return tonumber(a) < tonumber(b) end)
+ls
