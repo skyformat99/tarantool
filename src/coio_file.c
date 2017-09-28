@@ -34,6 +34,7 @@
 #include "say.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <dirent.h>
 
 
 /**
@@ -91,6 +92,11 @@ struct coio_file_task {
 		struct {
 			char *tpl;
 		} tempdir;
+
+		struct {
+			char **bufp;
+			const char *pathname;
+		} readdir;
 	};
 };
 
@@ -488,5 +494,69 @@ coio_fdatasync(int fd)
 {
 	INIT_COEIO_FILE(eio);
 	eio_req *req = eio_fdatasync(fd, 0, coio_complete, &eio);
+	return coio_wait_done(req, &eio);
+}
+
+static int
+save_to_buf(char *buf, char *word, size_t *len_buf, size_t *cap_buf){
+	assert(buf && word);
+	assert(len_buf && cap_buf);
+	size_t len = strlen(word) + 1;
+	if (*len_buf + len > *cap_buf) {
+		buf = (char *) realloc(buf, *cap_buf * 2);
+		if (!buf) {
+			return -1;
+		}
+		*cap_buf *= 2;
+	}
+	memcpy(buf, word, len);
+	*len_buf += len;
+	return 0;
+}
+
+static void
+coio_do_readdir(eio_req *req)
+{
+	struct coio_file_task *eio = (struct coio_file_task *)req->data;
+	DIR *dirp = opendir(eio->readdir.pathname);
+	if (!dirp) {
+		req->result = -1;
+		req->errorno = errno;
+		return;
+	}
+	size_t cap_buf = 128;
+	size_t len_buf = 0;
+	struct dirent *entry;
+	char *buf = (char *) calloc(cap_buf, sizeof(*buf));
+	if (!buf) {
+		req->result = -1;
+		req->errorno = errno;
+		return;
+	}
+	req->result = 0;
+	do {
+		entry = readdir(dirp);
+		if (entry && entry->d_name &&
+			strcmp(entry->d_name, ".") != 0 &&
+			strcmp(entry->d_name, "..") != 0) {
+			if (save_to_buf(buf + len_buf, entry->d_name, &len_buf, &cap_buf) < 0) {
+				req->result = -1;
+				req->errorno = errno;
+				return;
+			}
+			*(buf + len_buf - 1) = '\n';
+			req->result++;
+		}
+	} while(entry);
+	*(buf + len_buf - 1) = '\0';
+	*eio->readdir.bufp = buf;
+}
+
+int
+coio_readdir(const char *dir_path, char **buf) {
+	INIT_COEIO_FILE(eio)
+	eio.readdir.bufp = buf;
+	eio.readdir.pathname = dir_path;
+	eio_req *req = eio_custom(coio_do_readdir, 0, coio_complete, &eio);
 	return coio_wait_done(req, &eio);
 }
