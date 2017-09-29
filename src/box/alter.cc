@@ -2450,6 +2450,7 @@ lock_before_dd(struct trigger *trigger, void *event)
 	if (fiber() == latch_owner(&schema_lock))
 		return;
 	struct txn *txn = (struct txn *)event;
+	txn_check_singlestatement(txn, "Space unknown");
 	latch_lock(&schema_lock);
 	struct trigger *on_commit =
 		txn_alter_trigger_new(unlock_after_dd, NULL);
