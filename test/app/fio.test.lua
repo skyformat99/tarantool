@@ -174,3 +174,40 @@ fio.mkdir(fio.pathjoin(dir3, "3"))
 ls = fio.listdir(dir3)
 table.sort(ls, function(a, b) return tonumber(a) < tonumber(b) end)
 ls
+
+-- rmtree
+fio.stat(dir3) ~= nil
+fio.rmtree(dir3)
+fio.stat(dir3) == nil
+
+-- mktree
+tmp1 = fio.pathjoin(tmpdir, "1")
+tmp2 = fio.pathjoin(tmp1, "2")
+tree = fio.pathjoin(tmp2, "3")
+fio.mktree(tree)
+fio.stat(tree) ~= nil
+fio.stat(tmp2) ~= nil
+
+
+-- copy and copytree
+file1 = fio.pathjoin(tmp1, 'file.1')
+file2 = fio.pathjoin(tmp2, 'file.2')
+file3 = fio.pathjoin(tree, 'file.3')
+
+fh1 = fio.open(file1, { 'O_RDWR', 'O_TRUNC', 'O_CREAT' }, 0777)
+fh1:write("gogo")
+fh1:close()
+fh1 = fio.open(file2, { 'O_RDWR', 'O_TRUNC', 'O_CREAT' }, 0777)
+fh1:write("lolo")
+fh1:close()
+fio.symlink(file1, file3)
+fio.copyfile(file1, tmp2)
+fio.stat(fio.pathjoin(tmp2, "file.1")) ~= nil
+
+
+newdir = fio.pathjoin(tmpdir, "newdir")
+fio.copytree(fio.pathjoin(tmpdir, "1"), newdir)
+fio.stat(fio.pathjoin(newdir, "file.1")) ~= nil
+fio.stat(fio.pathjoin(newdir, "2", "file.2")) ~= nil
+fio.stat(fio.pathjoin(newdir, "2", "3", "file.3")) ~= nil
+fio.readlink(fio.pathjoin(newdir, "2", "3", "file.3")) == file1

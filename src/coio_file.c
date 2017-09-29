@@ -97,6 +97,11 @@ struct coio_file_task {
 			char **bufp;
 			const char *pathname;
 		} readdir;
+
+		struct {
+			const char *source;
+			const char *dest;
+		} copyfile;
 	};
 };
 
@@ -558,5 +563,75 @@ coio_readdir(const char *dir_path, char **buf) {
 	eio.readdir.bufp = buf;
 	eio.readdir.pathname = dir_path;
 	eio_req *req = eio_custom(coio_do_readdir, 0, coio_complete, &eio);
+	return coio_wait_done(req, &eio);
+}
+
+const size_t BUF_SIZE = 1024;
+static void
+coio_do_copyfile(eio_req *req)
+{
+	struct coio_file_task *eio = (struct coio_file_task *)req->data;
+
+	struct stat st;
+	if (stat(eio->copyfile.source, &st) < 0) {
+		req->errorno = errno;
+		req->result = -1;
+		return;
+	}
+
+	int source_fd = open(eio->copyfile.source, O_RDONLY);
+	if (source_fd < 0) {
+		req->errorno = errno;
+		req->result = -1;
+		return;
+	}
+
+	int dest_fd = open(eio->copyfile.dest, O_WRONLY | O_CREAT, st.st_mode & 07777);
+	if (dest_fd < 0) {
+		req->errorno = errno;
+		req->result = -1;
+		close(source_fd);
+		return;
+	}
+
+	char buf[BUF_SIZE];
+	ssize_t nread;
+	nread = read(source_fd, buf, sizeof(buf));
+	while (nread > 0) {
+		char *out_ptr = buf;
+		ssize_t nwritten;
+
+		do {
+			nwritten = write(dest_fd, out_ptr, nread);
+
+			if (nwritten >= 0) {
+				nread -= nwritten;
+				out_ptr += nwritten;
+			} else if (errno != EINTR) {
+				req->errorno = errno;
+				req->result = -1;
+				close(source_fd);
+				close(dest_fd);
+				return;
+			}
+		} while (nread > 0);
+		nread = read(source_fd, buf, sizeof(buf));
+	}
+	if (nread == 0) {
+		req->result = 0;
+	} else {
+		req->errorno = errno;
+		req->result = -1;
+	}
+	close(source_fd);
+	close(dest_fd);
+}
+
+int
+coio_copyfile(const char *source, const char *dest) {
+	INIT_COEIO_FILE(eio)
+	eio.copyfile.source = source;
+	eio.copyfile.dest = dest;
+	eio_req *req = eio_custom(coio_do_copyfile, 0, coio_complete, &eio);
 	return coio_wait_done(req, &eio);
 }
