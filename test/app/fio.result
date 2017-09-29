@@ -540,3 +540,105 @@ ls
   - '2'
   - '3'
 ...
+-- rmtree
+fio.stat(dir3) ~= nil
+---
+- true
+...
+fio.rmtree(dir3)
+---
+- true
+...
+fio.stat(dir3) == nil
+---
+- true
+...
+-- mktree
+tmp1 = fio.pathjoin(tmpdir, "1")
+---
+...
+tmp2 = fio.pathjoin(tmp1, "2")
+---
+...
+tree = fio.pathjoin(tmp2, "3")
+---
+...
+fio.mktree(tree)
+---
+- true
+...
+fio.stat(tree) ~= nil
+---
+- true
+...
+fio.stat(tmp2) ~= nil
+---
+- true
+...
+-- copy and copytree
+file1 = fio.pathjoin(tmp1, 'file.1')
+---
+...
+file2 = fio.pathjoin(tmp2, 'file.2')
+---
+...
+file3 = fio.pathjoin(tree, 'file.3')
+---
+...
+fh1 = fio.open(file1, { 'O_RDWR', 'O_TRUNC', 'O_CREAT' }, 0777)
+---
+...
+fh1:write("gogo")
+---
+- true
+...
+fh1:close()
+---
+- true
+...
+fh1 = fio.open(file2, { 'O_RDWR', 'O_TRUNC', 'O_CREAT' }, 0777)
+---
+...
+fh1:write("lolo")
+---
+- true
+...
+fh1:close()
+---
+- true
+...
+fio.symlink(file1, file3)
+---
+- true
+...
+fio.copyfile(file1, tmp2)
+---
+- true
+...
+fio.stat(fio.pathjoin(tmp2, "file.1")) ~= nil
+---
+- true
+...
+newdir = fio.pathjoin(tmpdir, "newdir")
+---
+...
+fio.copytree(fio.pathjoin(tmpdir, "1"), newdir)
+---
+- true
+...
+fio.stat(fio.pathjoin(newdir, "file.1")) ~= nil
+---
+- true
+...
+fio.stat(fio.pathjoin(newdir, "2", "file.2")) ~= nil
+---
+- true
+...
+fio.stat(fio.pathjoin(newdir, "2", "3", "file.3")) ~= nil
+---
+- true
+...
+fio.readlink(fio.pathjoin(newdir, "2", "3", "file.3")) == file1
+---
+- true
+...

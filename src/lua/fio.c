@@ -692,6 +692,19 @@ lbox_fio_close(struct lua_State *L)
 	return 1;
 }
 
+static int
+lbox_fio_copyfile(struct lua_State *L)
+{
+	const char *source = lua_tostring(L, -2);
+	const char *dest = lua_tostring(L, -1);
+	assert(source && dest);
+	if (coio_copyfile(source, dest) >= 0) {
+		lua_pushboolean(L, 1);
+	} else {
+		lua_pushboolean(L, 0);
+	}
+	return 1;
+}
 
 
 
@@ -736,6 +749,7 @@ tarantool_lua_fio_init(struct lua_State *L)
 		{ "fdatasync",		lbox_fio_fdatasync		},
 		{ "listdir",		lbox_fio_listdir		},
 		{ "fstat",		lbox_fio_fstat			},
+		{ "copyfile",		lbox_fio_copyfile,		},
 		{ NULL,			NULL				}
 	};
 	luaL_register(L, NULL, internal_methods);
