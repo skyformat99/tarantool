@@ -1589,6 +1589,19 @@ sqlite3WhereCodeOneLoopStart(WhereInfo * pWInfo,	/* Complete information about t
 			startEq = 0;
 			start_constraints = 1;
 		}
+		if (!HasRowid(pIdx->pTable)) {
+			struct Index *pk = sqlite3PrimaryKeyIndex(pIdx->pTable);
+			assert(pk);
+			if (pk->nKeyCol == 1
+			    && pIdx->pTable->aCol[0].affinity == 'D') {
+				for (int i = 0; i < pIdx->nColumn; i++) {
+					if (pIdx->aiColumn[i] == pk->aiColumn[0]
+						&& i < nEq) {
+						sqlite3VdbeAddOp2(v, OP_Cast, regBase + i, 'D');
+					}
+				}
+			}
+		}
 		codeApplyAffinity(pParse, regBase, nConstraint - bSeekPastNull,
 				  zStartAff);
 		if (pLoop->nSkip > 0 && nConstraint == pLoop->nSkip) {
