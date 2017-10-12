@@ -619,6 +619,10 @@ fio.stat(fio.pathjoin(tmp2, "file.1")) ~= nil
 ---
 - true
 ...
+fio.copyfile(fio.pathjoin(tmp1, 'not_exists.txt'), tmp1)
+---
+- false
+...
 newdir = fio.pathjoin(tmpdir, "newdir")
 ---
 ...

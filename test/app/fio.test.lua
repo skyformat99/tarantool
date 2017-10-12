@@ -204,6 +204,7 @@ fio.symlink(file1, file3)
 fio.copyfile(file1, tmp2)
 fio.stat(fio.pathjoin(tmp2, "file.1")) ~= nil
 
+fio.copyfile(fio.pathjoin(tmp1, 'not_exists.txt'), tmp1)
 
 newdir = fio.pathjoin(tmpdir, "newdir")
 fio.copytree(fio.pathjoin(tmpdir, "1"), newdir)
