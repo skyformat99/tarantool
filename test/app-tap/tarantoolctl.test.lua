@@ -150,7 +150,7 @@ local function check_ok(test, dir, cmd, args, e_res, e_stdout, e_stderr)
 end
 
 local test = tap.test('tarantoolctl')
-test:plan(6)
+test:plan(75)
 
 -- basic start/stop test
 -- must be stopped afterwards

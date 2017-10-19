@@ -9,7 +9,7 @@ box.cfg{
 local trigger = require('internal.trigger')
 local test = require('tap').test('trigger')
 
-test:plan(3)
+test:plan(19)
 
 local trigger_list = trigger.new("sweet trigger")
 test:ok(trigger_list ~= nil, "test that trigger list is created")

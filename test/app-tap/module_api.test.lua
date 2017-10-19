@@ -3,6 +3,7 @@
 box.cfg{log = "tarantool.log"}
 build_path = os.getenv("BUILDDIR")
 package.cpath = build_path .. '/test/app-tap/?.so;' .. build_path .. '/test/app-tap/?.dylib;'
+local test = require('tap')
 
 local function test_pushcdata(test, module)
     test:plan(6)
@@ -32,8 +33,8 @@ local function test_pushcdata(test, module)
     test:is(gc_counter, 1, 'pushcdata gc')
 end
 
-local test = require('tap').test("module_api", function(test)
-    test:plan(21)
+test.test("module_api", function(test)
+    test:plan(28)
     local status, module = pcall(require, 'module_api')
     test:is(status, true, "module")
     test:ok(status, "module is loaded")

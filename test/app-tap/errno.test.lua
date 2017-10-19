@@ -5,7 +5,7 @@ local errno = require('errno')
 
 local test = tap.test("errno")
 
-test:plan(1)
+test:plan(11)
 test:test("primary", function(test)
     test:plan(10)
     test:is(type(errno), "table", "type of table")

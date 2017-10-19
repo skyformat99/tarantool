@@ -3,7 +3,7 @@
 local tap = require('tap')
 local test = tap.test("string extensions")
 
-test:plan(4)
+test:plan(51)
 
 test:test("split", function(test)
     test:plan(10)

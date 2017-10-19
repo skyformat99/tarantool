@@ -71,7 +71,7 @@ end
 
 tap.test("yaml", function(test)
     local serializer = require('yaml')
-    test:plan(10)
+    test:plan(262)
     test:test("unsigned", common.test_unsigned, serializer)
     test:test("signed", common.test_signed, serializer)
     test:test("double", common.test_double, serializer)

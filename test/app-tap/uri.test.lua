@@ -65,7 +65,7 @@ local function test_format(test)
 end
 
 tap.test("uri", function(test)
-    test:plan(2)
+    test:plan(33)
     test:test("parse", test_parse)
     test:test("format", test_format)
 end)

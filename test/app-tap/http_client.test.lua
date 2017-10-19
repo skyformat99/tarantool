@@ -11,7 +11,7 @@ local yaml = require('yaml')
 
 local TARANTOOL_SRC_DIR = os.getenv("TARANTOOL_SRC_DIR") or "../.."
 
-test:plan(9)
+test:plan(63)
 
 local function start_server()
     local s = socketlib('AF_INET', 'SOCK_STREAM', 0)

@@ -48,7 +48,7 @@ end
 
 tap.test("msgpack", function(test)
     local serializer = require('msgpack')
-    test:plan(10)
+    test:plan(250)
     test:test("unsigned", common.test_unsigned, serializer)
     test:test("signed", common.test_signed, serializer)
     test:test("double", common.test_double, serializer)
