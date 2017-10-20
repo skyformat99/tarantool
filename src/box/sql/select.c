@@ -1549,14 +1549,13 @@ generateSortTail(Parse * pParse,	/* Parsing context */
  * the SQLITE_ENABLE_COLUMN_METADATA compile-time option is used.
  */
 #ifdef SQLITE_ENABLE_COLUMN_METADATA
-#define columnType(A,B,C,D,E,F) columnTypeImpl(A,B,C,D,E,F)
+#define columnType(A,B,C,D,E,F) columnTypeImpl(A,B,D,E,F)
 #else				/* if !defined(SQLITE_ENABLE_COLUMN_METADATA) */
 #define columnType(A,B,C,D,E,F) columnTypeImpl(A,B,F)
 #endif
 static const char *
 columnTypeImpl(NameContext * pNC, Expr * pExpr,
 #ifdef SQLITE_ENABLE_COLUMN_METADATA
-	       const char **pzOrigDb,
 	       const char **pzOrigTab, const char **pzOrigCol,
 #endif
 	       u8 * pEstWidth)
@@ -1565,7 +1564,6 @@ columnTypeImpl(NameContext * pNC, Expr * pExpr,
 	int j;
 	u8 estWidth = 1;
 #ifdef SQLITE_ENABLE_COLUMN_METADATA
-	char const *zOrigDb = 0;
 	char const *zOrigTab = 0;
 	char const *zOrigCol = 0;
 #endif
@@ -1641,7 +1639,7 @@ columnTypeImpl(NameContext * pNC, Expr * pExpr,
 					sNC.pNext = pNC;
 					sNC.pParse = pNC->pParse;
 					zType =
-					    columnType(&sNC, p, &zOrigDb,
+					    columnType(&sNC, p, 0,
 						       &zOrigTab, &zOrigCol,
 						       &estWidth);
 				}
@@ -1664,13 +1662,6 @@ columnTypeImpl(NameContext * pNC, Expr * pExpr,
 					estWidth = pTab->aCol[iCol].szEst;
 				}
 				zOrigTab = pTab->zName;
-				if (pNC->pParse) {
-					int iDb =
-					    sqlite3SchemaToIndex(pNC->pParse->db,
-								 pTab->pSchema);
-					zOrigDb =
-					    pNC->pParse->db->aDb[iDb].zDbSName;
-				}
 #else
 				if (iCol < 0) {
 					zType = "INTEGER";
@@ -1698,7 +1689,7 @@ columnTypeImpl(NameContext * pNC, Expr * pExpr,
 			sNC.pNext = pNC;
 			sNC.pParse = pNC->pParse;
 			zType =
-			    columnType(&sNC, p, &zOrigDb, &zOrigTab, &zOrigCol,
+			    columnType(&sNC, p, 0, &zOrigTab, &zOrigCol,
 				       &estWidth);
 			break;
 		}
@@ -1706,9 +1697,8 @@ columnTypeImpl(NameContext * pNC, Expr * pExpr,
 	}
 
 #ifdef SQLITE_ENABLE_COLUMN_METADATA
-	if (pzOrigDb) {
+	if (pzOrigTab) {
 		assert(pzOrigTab && pzOrigCol);
-		*pzOrigDb = zOrigDb;
 		*pzOrigTab = zOrigTab;
 		*pzOrigCol = zOrigCol;
 	}
@@ -4005,10 +3995,8 @@ flattenSubquery(Parse * pParse,		/* Parsing context */
 	/* Delete the transient table structure associated with the
 	 * subquery
 	 */
-	sqlite3DbFree(db, pSubitem->zDatabase);
 	sqlite3DbFree(db, pSubitem->zName);
 	sqlite3DbFree(db, pSubitem->zAlias);
-	pSubitem->zDatabase = 0;
 	pSubitem->zName = 0;
 	pSubitem->zAlias = 0;
 	pSubitem->pSelect = 0;
@@ -4059,7 +4047,7 @@ flattenSubquery(Parse * pParse,		/* Parsing context */
 		} else {
 			assert(pParent != p);	/* 2nd and subsequent times through the loop */
 			pSrc = pParent->pSrc =
-			    sqlite3SrcListAppend(db, 0, 0, 0);
+			    sqlite3SrcListAppend(db, 0, 0);
 			if (pSrc == 0) {
 				assert(db->mallocFailed);
 				break;
@@ -4442,7 +4430,7 @@ convertCompoundSelectToSubquery(Walker * pWalker, Select * p)
 		return WRC_Abort;
 	memset(&dummy, 0, sizeof(dummy));
 	pNewSrc =
-	    sqlite3SrcListAppendFromTerm(pParse, 0, 0, 0, &dummy, pNew, 0, 0);
+	    sqlite3SrcListAppendFromTerm(pParse, 0, 0, &dummy, pNew, 0, 0);
 	if (pNewSrc == 0)
 		return WRC_Abort;
 	*pNew = *p;
@@ -4499,7 +4487,7 @@ searchWith(With * pWith,		/* Current innermost WITH clause */
 	   With ** ppContext)		/* OUT: WITH clause return value belongs to */
 {
 	const char *zName;
-	if (pItem->zDatabase == 0 && (zName = pItem->zName) != 0) {
+	if ((zName = pItem->zName) != 0) {
 		With *p;
 		for (p = pWith; p; p = p->pOuter) {
 			int i;
@@ -4606,8 +4594,7 @@ withExpand(Walker * pWalker, struct SrcList_item *pFrom)
 			SrcList *pSrc = pFrom->pSelect->pSrc;
 			for (i = 0; i < pSrc->nSrc; i++) {
 				struct SrcList_item *pItem = &pSrc->a[i];
-				if (pItem->zDatabase == 0
-				    && pItem->zName != 0
+				if (pItem->zName != 0
 				    && 0 == sqlite3StrICmp(pItem->zName,
 							   pCte->zName)
 				    ) {
@@ -4908,8 +4895,6 @@ selectExpander(Walker * pWalker, Select * p)
 					Table *pTab = pFrom->pTab;
 					Select *pSub = pFrom->pSelect;
 					char *zTabName = pFrom->zAlias;
-					const char *zSchemaName = 0;
-					int iDb;
 					if (zTabName == 0) {
 						zTabName = pTab->zName;
 					}
@@ -4926,12 +4911,6 @@ selectExpander(Walker * pWalker, Select * p)
 						    != 0) {
 							continue;
 						}
-						iDb =
-						    sqlite3SchemaToIndex(db,
-									 pTab->pSchema);
-						zSchemaName =
-						    iDb ==
-						    0 ? db->mdb.zDbSName : 0;
 					}
 					for (j = 0; j < pTab->nCol; j++) {
 						char *zName =
@@ -4944,8 +4923,7 @@ selectExpander(Walker * pWalker, Select * p)
 						if (zTName && pSub
 						    && sqlite3MatchSpanName(pSub->pEList->a[j].zSpan,
 									    0,
-									    zTName,
-									    0) == 0) {
+									    zTName) == 0) {
 							continue;
 						}
 
@@ -4995,18 +4973,6 @@ selectExpander(Walker * pWalker, Select * p)
 									 TK_DOT,
 									 pLeft,
 									 pRight);
-							if (zSchemaName) {
-								pLeft =
-								    sqlite3Expr
-								    (db, TK_ID,
-								     zSchemaName);
-								pExpr =
-								    sqlite3PExpr
-								    (pParse,
-								     TK_DOT,
-								     pLeft,
-								     pExpr);
-							}
 							if (longNames) {
 								zColname =
 								    sqlite3MPrintf
@@ -5040,8 +5006,7 @@ selectExpander(Walker * pWalker, Select * p)
 								testcase(pX->zSpan == 0);
 							} else {
 								pX->zSpan = sqlite3MPrintf(db,
-											   "%s.%s.%s",
-											   zSchemaName,
+											   "%s.%s",
 											   zTabName,
 											   zColname);
 								testcase(pX->zSpan == 0);
@@ -6223,9 +6188,6 @@ sqlite3Select(Parse * pParse,		/* The parser context */
 				 * is better to execute the op on an index, as indexes are almost
 				 * always spread across less pages than their corresponding tables.
 				 */
-				const int iDb =
-				    sqlite3SchemaToIndex(pParse->db,
-							 pTab->pSchema);
 				const int iCsr = pParse->nTab++;	/* Cursor to scan b-tree */
 				Index *pIdx;	/* Iterator variable */
 				KeyInfo *pKeyInfo = 0;	/* Keyinfo for scanned index */
@@ -6268,7 +6230,7 @@ sqlite3Select(Parse * pParse,		/* The parser context */
 
 				/* Open a read-only cursor, execute the OP_Count, close the cursor. */
 				sqlite3VdbeAddOp4Int(v, OP_OpenRead, iCsr,
-						     iRoot, iDb, 1);
+						     iRoot, 0, 1);
 				if (pKeyInfo) {
 					sqlite3VdbeChangeP4(v, -1,
 							    (char *)pKeyInfo,

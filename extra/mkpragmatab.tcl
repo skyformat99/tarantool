@@ -152,11 +152,6 @@ set pragma_def {
   COLS: seq name unique origin partial
   IF:   !defined(SQLITE_OMIT_SCHEMA_PRAGMAS)
 
-  NAME: database_list
-  FLAG: NeedSchema Result0
-  COLS: seq name file
-  IF:   !defined(SQLITE_OMIT_SCHEMA_PRAGMAS)
-
   NAME: collation_list
   FLAG: Result0
   COLS: seq name

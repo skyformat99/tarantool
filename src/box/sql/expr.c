@@ -1578,7 +1578,6 @@ sqlite3SrcListDup(sqlite3 * db, SrcList * p, int flags)
 		struct SrcList_item *pOldItem = &p->a[i];
 		Table *pTab;
 		pNewItem->pSchema = pOldItem->pSchema;
-		pNewItem->zDatabase = sqlite3DbStrDup(db, pOldItem->zDatabase);
 		pNewItem->zName = sqlite3DbStrDup(db, pOldItem->zName);
 		pNewItem->zAlias = sqlite3DbStrDup(db, pOldItem->zAlias);
 		pNewItem->fg = pOldItem->fg;
@@ -2482,7 +2481,6 @@ sqlite3FindInIndex(Parse * pParse,	/* Parsing context */
 	if (pParse->nErr == 0 && (p = isCandidateForInOpt(pX)) != 0) {
 		sqlite3 *db = pParse->db;	/* Database connection */
 		Table *pTab;	/* Table <table>. */
-		i16 iDb;	/* Database idx for pTab */
 		ExprList *pEList = p->pEList;
 		int nExpr = pEList->nExpr;
 
@@ -2492,7 +2490,6 @@ sqlite3FindInIndex(Parse * pParse,	/* Parsing context */
 		pTab = p->pSrc->a[0].pTab;
 
 		/* Code an OP_Transaction and OP_TableLock for <table>. */
-		iDb = sqlite3SchemaToIndex(db, pTab->pSchema);
 		sqlite3CodeVerifySchema(pParse);
 		sqlite3TableLock(pParse, pTab->tnum, 0, pTab->zName);
 
@@ -2633,7 +2630,7 @@ sqlite3FindInIndex(Parse * pParse,	/* Parsing context */
 								  OP_OpenRead,
 								  iTab,
 								  pIdx->tnum,
-								  iDb);
+								  0);
 						sqlite3VdbeSetP4KeyInfo(pParse,
 									pIdx);
 						VdbeComment((v, "%s",
