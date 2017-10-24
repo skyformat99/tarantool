@@ -183,8 +183,7 @@ sqlite3ExprCollSeq(Parse * pParse, Expr * pExpr)
 		if (op == TK_COLLATE
 		    || (op == TK_REGISTER && p->op2 == TK_COLLATE)) {
 			pColl =
-			    sqlite3GetCollSeq(pParse, db, ENC(db), 0,
-					      p->u.zToken);
+			    sqlite3GetCollSeq(pParse, db, 0, p->u.zToken);
 			break;
 		}
 		if ((op == TK_AGG_COLUMN || op == TK_COLUMN
@@ -197,7 +196,7 @@ sqlite3ExprCollSeq(Parse * pParse, Expr * pExpr)
 			if (j >= 0) {
 				const char *zColl = p->pTab->aCol[j].zColl;
 				pColl =
-				    sqlite3FindCollSeq(db, ENC(db), zColl, 0);
+				    sqlite3FindCollSeq(db, zColl, 0);
 			}
 			break;
 		}
@@ -1123,7 +1122,7 @@ sqlite3ExprAssignVarNumber(Parse * pParse, Expr * pExpr, u32 n)
 			 */
 			i64 i;
 			int bOk =
-			    0 == sqlite3Atoi64(&z[1], &i, n - 1, SQLITE_UTF8);
+			    0 == sqlite3Atoi64(&z[1], &i, n - 1);
 			x = (ynVar) i;
 			testcase(i == 0);
 			testcase(i == 1);
@@ -3481,7 +3480,7 @@ codeReal(Vdbe * v, const char *z, int negateFlag, int iMem)
 {
 	if (ALWAYS(z != 0)) {
 		double value;
-		sqlite3AtoF(z, &value, sqlite3Strlen30(z), SQLITE_UTF8);
+		sqlite3AtoF(z, &value, sqlite3Strlen30(z));
 		assert(!sqlite3IsNaN(value));	/* The new AtoF never returns NaN */
 		if (negateFlag)
 			value = -value;
@@ -4226,7 +4225,6 @@ sqlite3ExprCodeTarget(Parse * pParse, Expr * pExpr, int target)
 			u32 constMask = 0;	/* Mask of function arguments that are constant */
 			int i;	/* Loop counter */
 			sqlite3 *db = pParse->db;	/* The database connection */
-			u8 enc = ENC(db);	/* The text encoding used by this database */
 			CollSeq *pColl = 0;	/* A collating sequence */
 
 			assert(!ExprHasProperty(pExpr, EP_xIsSelect));
@@ -4238,12 +4236,11 @@ sqlite3ExprCodeTarget(Parse * pParse, Expr * pExpr, int target)
 			nFarg = pFarg ? pFarg->nExpr : 0;
 			assert(!ExprHasProperty(pExpr, EP_IntValue));
 			zId = pExpr->u.zToken;
-			pDef = sqlite3FindFunction(db, zId, nFarg, enc, 0);
+			pDef = sqlite3FindFunction(db, zId, nFarg, 0);
 #ifdef SQLITE_ENABLE_UNKNOWN_SQL_FUNCTION
 			if (pDef == 0 && pParse->explain) {
 				pDef =
-				    sqlite3FindFunction(db, "unknown", nFarg,
-							enc, 0);
+				    sqlite3FindFunction(db, "unknown", nFarg, 0);
 			}
 #endif
 			if (pDef == 0 || pDef->xFinalize != 0) {
@@ -5757,7 +5754,6 @@ analyzeAggregate(Walker * pWalker, Expr * pExpr)
 				if (i >= pAggInfo->nFunc) {
 					/* pExpr is original.  Make a new entry in pAggInfo->aFunc[]
 					 */
-					u8 enc = ENC(pParse->db);
 					i = addAggInfoFunc(pParse->db,
 							   pAggInfo);
 					if (i >= 0) {
@@ -5781,7 +5777,7 @@ analyzeAggregate(Walker * pWalker, Expr * pExpr)
 									x.
 									pList->
 									nExpr :
-									0, enc,
+									0,
 									0);
 						if (pExpr->flags & EP_Distinct) {
 							pItem->iDistinct =

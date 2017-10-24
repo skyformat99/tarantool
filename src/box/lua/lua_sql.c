@@ -174,8 +174,7 @@ int lbox_sql_create_function(struct lua_State *L)
 	name = lua_tostring(L, 1);
 	func_info = (struct lua_sql_func_info*)malloc(sizeof(struct lua_sql_func_info));
 	func_info->func_ref = luaL_ref(L, LUA_REGISTRYINDEX);
-	sqlite3_create_function_v2(db, name, func_arg_num,
-				   SQLITE_UTF8, func_info,
+	sqlite3_create_function_v2(db, name, func_arg_num, 0, func_info,
 				   lua_sql_call, NULL, NULL, lua_sql_destroy);
 	return 0;
 }
