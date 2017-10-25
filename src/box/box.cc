@@ -105,6 +105,18 @@ static bool is_box_configured = false;
 static bool is_ro = true;
 
 /**
+ * Set to true when the WAL has been initialized. The instance
+ * is ready to accept join/subscribe requests as soon as this
+ * flag is set, but it will reject DML/DQL requests until it
+ * catches up with the master(s), at which point is_box_configured
+ * is set. We need to differentiate the two states (bootstrap vs
+ * configuration completion) so that simultaneously started
+ * replicas can catch up with each other before starting to
+ * process user requests.
+ */
+static bool is_bootstrap_complete = false;
+
+/**
  * box.cfg{} will fail if one or more replicas can't be reached
  * within the given period.
  */
@@ -779,6 +791,9 @@ box_index_id_by_name(uint32_t space_id, const char *name, uint32_t len)
 int
 box_process1(struct request *request, box_tuple_t **result)
 {
+	if (!is_box_configured)
+		tnt_raise(ClientError, ER_LOADING);
+
 	/* Allow to write to temporary spaces in read-only mode. */
 	struct space *space = space_cache_find(request->space_id);
 	if (space == NULL)
@@ -794,6 +809,9 @@ box_select(struct port *port, uint32_t space_id, uint32_t index_id,
 	   const char *key, const char *key_end)
 {
 	(void)key_end;
+
+	if (!is_box_configured)
+		tnt_raise(ClientError, ER_LOADING);
 
 	rmean_collect(rmean_box, IPROTO_SELECT, 1);
 
@@ -1132,7 +1150,7 @@ box_process_auth(struct auth_request *request, struct obuf *out)
 	rmean_collect(rmean_box, IPROTO_AUTH, 1);
 
 	/* Check that bootstrap has been finished */
-	if (!is_box_configured)
+	if (!is_bootstrap_complete)
 		tnt_raise(ClientError, ER_LOADING);
 
 	const char *user = request->user_name;
@@ -1192,7 +1210,7 @@ box_process_join(struct ev_io *io, struct xrow_header *header)
 	xrow_decode_join(header, &instance_uuid);
 
 	/* Check that bootstrap has been finished */
-	if (!is_box_configured)
+	if (!is_bootstrap_complete)
 		tnt_raise(ClientError, ER_LOADING);
 
 	/* Forbid connection to itself */
@@ -1288,7 +1306,7 @@ box_process_subscribe(struct ev_io *io, struct xrow_header *header)
 	assert(header->type == IPROTO_SUBSCRIBE);
 
 	/* Check that bootstrap has been finished */
-	if (!is_box_configured)
+	if (!is_bootstrap_complete)
 		tnt_raise(ClientError, ER_LOADING);
 
 	struct tt_uuid replicaset_uuid = uuid_nil, replica_uuid = uuid_nil;
@@ -1749,10 +1767,32 @@ box_cfg_xc(void)
 
 	rmean_cleanup(rmean_box);
 
+	/*
+	 * Accept join/subscribe requests as soon as the WAL
+	 * has been initialized.
+	 */
+	is_bootstrap_complete = true;
+
 	/* Follow replica */
 	replicaset_foreach(replica) {
 		if (replica->applier != NULL)
 			applier_resume(replica->applier);
+	}
+
+	if (last_checkpoint_lsn >= 0) {
+		/*
+		 * Wait until appliers catch up with upstream before
+		 * starting to process user requests. Note, a freshly
+		 * bootstrapped replica should not fall behind the
+		 * master for too much, because it should have received
+		 * recent data during "final join" stage, so this is
+		 * only necessary in case of local recovery.
+		 */
+		replicaset_foreach(replica) {
+			if (replica->applier != NULL)
+				applier_wait(replica->applier, APPLIER_FOLLOW,
+					     TIMEOUT_INFINITY);
+		}
 	}
 
 	title("running");

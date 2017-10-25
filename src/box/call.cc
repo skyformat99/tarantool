@@ -144,6 +144,9 @@ box_func_reload(const char *name)
 void
 box_process_call(struct call_request *request, struct obuf *out)
 {
+	if (!box_is_configured())
+		tnt_raise(ClientError, ER_LOADING);
+
 	rmean_collect(rmean_box, IPROTO_CALL, 1);
 	/**
 	 * Find the function definition and check access.
@@ -207,6 +210,9 @@ box_process_call(struct call_request *request, struct obuf *out)
 void
 box_process_eval(struct call_request *request, struct obuf *out)
 {
+	if (!box_is_configured())
+		tnt_raise(ClientError, ER_LOADING);
+
 	rmean_collect(rmean_box, IPROTO_EVAL, 1);
 	/* Check permissions */
 	access_check_universe(PRIV_X);

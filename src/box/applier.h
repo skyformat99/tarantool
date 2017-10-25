@@ -60,9 +60,10 @@ enum { APPLIER_SOURCE_MAXLEN = 1024 }; /* enough to fit URI with passwords */
 	_(APPLIER_INITIAL_JOIN, 5)                                   \
 	_(APPLIER_FINAL_JOIN, 6)                                     \
 	_(APPLIER_JOINED, 7)                                         \
-	_(APPLIER_FOLLOW, 8)                                         \
-	_(APPLIER_STOPPED, 9)                                        \
-	_(APPLIER_DISCONNECTED, 10)                                  \
+	_(APPLIER_SUBSCRIBE, 8)                                      \
+	_(APPLIER_FOLLOW, 9)                                         \
+	_(APPLIER_STOPPED, 10)                                       \
+	_(APPLIER_DISCONNECTED, 11)                                  \
 
 /** States for the applier */
 ENUM(applier_state, applier_STATE);
@@ -180,5 +181,13 @@ applier_resume_to_state(struct applier *applier, enum applier_state state,
  */
 void
 applier_resume(struct applier *applier);
+
+/**
+ * Wait until applier enters \a state or stops.
+ * Note, this function doesn't throw errors.
+ */
+void
+applier_wait(struct applier *applier, enum applier_state state,
+	     double timeout);
 
 #endif /* TARANTOOL_APPLIER_H_INCLUDED */

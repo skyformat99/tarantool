@@ -83,6 +83,7 @@ applier_log_error(struct applier *applier, struct error *e)
 		say_info("failed to authenticate");
 		break;
 	case APPLIER_FOLLOW:
+	case APPLIER_SUBSCRIBE:
 	case APPLIER_INITIAL_JOIN:
 	case APPLIER_FINAL_JOIN:
 		say_info("can't read row");
@@ -368,7 +369,7 @@ applier_subscribe(struct applier *applier)
 	coio_write_xrow(coio, &row);
 
 	if (applier->state == APPLIER_READY) {
-		applier_set_state(applier, APPLIER_FOLLOW);
+		applier_set_state(applier, APPLIER_SUBSCRIBE);
 	} else {
 		/*
 		 * Tarantool < 1.7.0 sends replica id during
@@ -382,6 +383,7 @@ applier_subscribe(struct applier *applier)
 	/*
 	 * Read SUBSCRIBE response
 	 */
+	struct vclock subscribe_vclock;
 	if (applier->version_id >= version_id(1, 6, 7)) {
 		coio_read_xrow(coio, &iobuf->in, &row);
 		if (iproto_type_is_error(row.type)) {
@@ -394,9 +396,8 @@ applier_subscribe(struct applier *applier)
 		 * In case of successful subscribe, the server
 		 * responds with its current vclock.
 		 */
-		struct vclock vclock;
-		vclock_create(&vclock);
-		xrow_decode_vclock_xc(&row, &vclock);
+		vclock_create(&subscribe_vclock);
+		xrow_decode_vclock_xc(&row, &subscribe_vclock);
 	}
 	/**
 	 * Tarantool < 1.6.7:
@@ -413,12 +414,34 @@ applier_subscribe(struct applier *applier)
 	 * Process a stream of rows from the binary log.
 	 */
 	while (true) {
-		if (applier->state == APPLIER_FINAL_JOIN &&
-		    instance_id != REPLICA_ID_NIL) {
-			say_info("final data received");
-			applier_set_state(applier, APPLIER_JOINED);
-			applier_set_state(applier, APPLIER_READY);
-			applier_set_state(applier, APPLIER_FOLLOW);
+		switch (applier->state) {
+		case APPLIER_FINAL_JOIN:
+			/*
+			 * Finish join to Tarantool < 1.7.0
+			 * as soon as replica id is received.
+			 */
+			if (instance_id != REPLICA_ID_NIL) {
+				say_info("final data received");
+				applier_set_state(applier, APPLIER_JOINED);
+				applier_set_state(applier, APPLIER_READY);
+				applier_set_state(applier, APPLIER_SUBSCRIBE);
+			}
+			FALLTHROUGH;
+		case APPLIER_SUBSCRIBE:
+			/*
+			 * Complete "subscribe" stage as soon as
+			 * we catch up with the master vclock from
+			 * the time when subscription was started.
+			 */
+			if (vclock_compare(&subscribe_vclock,
+					   &replicaset_vclock) <= 0) {
+				applier_set_state(applier, APPLIER_FOLLOW);
+			}
+			break;
+		case APPLIER_FOLLOW:
+			break;
+		default:
+			unreachable();
 		}
 
 		coio_read_xrow(coio, &iobuf->in, &row);
@@ -701,9 +724,14 @@ applier_wait_for_state(struct applier_on_state *trigger, double timeout)
 	if (applier->state != trigger->desired_state) {
 		assert(applier->state == APPLIER_OFF ||
 		       applier->state == APPLIER_STOPPED);
-		/* Re-throw the original error */
-		assert(!diag_is_empty(&applier->reader->diag));
-		diag_move(&applier->reader->diag, &fiber()->diag);
+		/*
+		 * Re-throw the original error, but leave the error
+		 * in the applier's diagnostic area so that it is
+		 * reported in box.info.replication.
+		 */
+		struct diag *diag = &applier->reader->diag;
+		assert(!diag_is_empty(diag));
+		diag_add_error(diag_get(), diag_last_error(diag));
 		return -1;
 	}
 	return 0;
@@ -789,4 +817,20 @@ applier_resume_to_state(struct applier *applier, enum applier_state state,
 	if (rc != 0)
 		diag_raise();
 	assert(applier->state == state);
+}
+
+void
+applier_wait(struct applier *applier, enum applier_state state,
+	     double timeout)
+{
+	if (applier->state == state ||
+	    applier->state == APPLIER_OFF ||
+	    applier->state == APPLIER_STOPPED)
+		return;
+
+	struct applier_on_state trigger;
+	applier_add_on_state(applier, &trigger, state);
+	if (applier_wait_for_state(&trigger, timeout) == 0)
+		applier_resume(applier);
+	applier_clear_on_state(&trigger);
 }

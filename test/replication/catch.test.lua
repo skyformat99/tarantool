@@ -26,36 +26,21 @@ test_run:cmd("stop server replica")
 -- insert values on the master while replica is stopped and can't fetch them
 for i=1,100 do s:insert{i, 'this is test message12345'} end
 
--- sleep after every tuple
-errinj.set("ERRINJ_RELAY_TIMEOUT", 1000.0)
+-- Check that replica doesn't accept requests before catching up
+-- with the master. To check that we inject sleep into the master
+-- relay_send function and execute a 'select' on the replica.
+-- We should see all data inserted while the replica was down,
+-- not just a part of it.
+
+errinj.set("ERRINJ_RELAY_TIMEOUT", 0.001)
 
 test_run:cmd("start server replica")
 test_run:cmd("switch replica")
 
-fiber = require('fiber')
-while box.space.test:count() < 1 do fiber.sleep(0.01) end
--- Check that replica doesn't enter read-write mode before
--- catching up with the master: to check that we inject sleep into
--- the master relay_send function and attempt a data modifying
--- statement in replica while it's still fetching data from the
--- master.
--- In the next two cases we try to delete a tuple while replica is
--- catching up with the master (local delete, remote delete) case
---
--- #1: delete tuple on replica
---
-box.space.test ~= nil
-d = box.space.test:delete{1}
-box.space.test:get(1) == nil
-
--- case #2: delete tuple by net.box
+box.space.test:count() -- 100
 
 test_run:cmd("switch default")
-test_run:cmd("set variable r_uri to 'replica.listen'")
-c = net_box.connect(r_uri)
-c.space.test:get(1) == nil
 
--- check sync
 errinj.set("ERRINJ_RELAY_TIMEOUT", 0)
 
 -- cleanup
