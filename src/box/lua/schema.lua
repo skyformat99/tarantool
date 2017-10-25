@@ -316,6 +316,38 @@ end
 -- box.commit yields, so it's defined as Lua/C binding
 -- box.rollback yields as well
 
+function update_format(format)
+    local result = {}
+    for i,given in pairs(format) do
+        local field = {}
+        if type(given) ~= "table" then
+            field.name = given
+        else
+            for k, v in pairs(given) do
+                if k == 1 then
+                    field.name = v;
+                elseif k == 2 then
+                    field.type = v;
+                else
+                    field[k] = v
+                end
+            end
+        end
+        if type(field.name) ~= 'string' then
+            box.error(box.error.ILLEGAL_PARAMS,
+                "format[" .. i .. "]: name (string) is expected")
+        end
+        if field.type == nil then
+            field.type = 'any'
+        elseif type(field.type) ~= 'string' then
+            box.error(box.error.ILLEGAL_PARAMS,
+                "format[" .. i .. "]: type must be a string")
+        end
+        table.insert(result, field)
+    end
+    return result
+end
+
 box.schema.space = {}
 box.schema.space.create = function(name, options)
     check_param(name, 'name', 'string')
@@ -365,6 +397,8 @@ box.schema.space.create = function(name, options)
         uid = session.uid()
     end
     local format = options.format and options.format or {}
+    check_param(format, 'format', 'table')
+    format = update_format(format)
     -- filter out global parameters from the options array
     local space_options = setmap({
         temporary = options.temporary and true or nil,
@@ -383,6 +417,7 @@ function box.schema.space.format(id, format)
         return _space:get(id)[7]
     else
         check_param(format, 'format', 'table')
+        format = update_format(format)
         _space:update(id, {{'=', 7, format}})
     end
 end
@@ -433,11 +468,8 @@ end
 
 box.schema.index = {}
 
-local function check_index_parts(parts)
-    if type(parts) ~= "table" then
-        box.error(box.error.ILLEGAL_PARAMS,
-                  "options.parts parameter should be a table")
-    end
+local function update_index_parts_1_6_0(parts)
+    local result = {}
     if #parts % 2 ~= 0 then
         box.error(box.error.ILLEGAL_PARAMS,
                   "options.parts: expected field_no (number), type (string) pairs")
@@ -451,26 +483,86 @@ local function check_index_parts(parts)
             box.error(box.error.ILLEGAL_PARAMS,
                       "invalid index parts: field_no must be one-based")
         end
-    end
-    for i=2,#parts,2 do
-        if type(parts[i]) ~= "string" then
+        if type(parts[i + 1]) ~= "string" then
             box.error(box.error.ILLEGAL_PARAMS,
                       "options.parts: expected field_no (number), type (string) pairs")
         end
+        table.insert(result, {field = parts[i] - 1, type = parts[i + 1]})
     end
+    return result
 end
 
-local function update_index_parts(parts)
-    local new_parts = {}
-    for i=1,#parts do
-        -- Lua uses one-based field numbers but _space is zero-based
-        if i % 2 == 1 then
-            new_parts[i] = parts[i] - 1
-        else
-            new_parts[i] = parts[i]
-        end
+local function update_index_parts(space_id, parts)
+    if type(parts) ~= "table" then
+        box.error(box.error.ILLEGAL_PARAMS,
+        "options.parts parameter should be a table")
     end
-    return new_parts
+    if #parts == 0 then
+        box.error(box.error.ILLEGAL_PARAMS,
+        "options.parts must have at least one part")
+    end
+    if type(parts[1]) == 'number' and type(parts[2]) == 'string' then
+        return update_index_parts_1_6_0(parts)
+    end
+
+    local result = {}
+    for i=1,#parts do
+        local part = {}
+        if type(parts[i]) ~= "table" then
+            part.field = parts[i]
+        else
+            for k, v in pairs(parts[i]) do
+                -- Support {1, 'unsigned', collation='xx'} shortcut
+                if k == 1 then
+                    part.field = v;
+                elseif k == 2 then
+                    part.type = v;
+                elseif k == 'collation' then
+                    -- find ID by name
+                    local coll = box.space._collation.index.name:get{v}
+                    if not coll then
+                        box.error(box.error.ILLEGAL_PARAMS,
+                            "options.parts[" .. i .. "]: collation was not found by name '" .. v .. "'")
+                    end
+                    part[k] = coll[1]
+                else
+                    part[k] = v
+                end
+            end
+        end
+        if type(part.field) ~= 'number' and type(part.field) ~= 'string' then
+            box.error(box.error.ILLEGAL_PARAMS,
+                      "options.parts[" .. i .. "]: field (name or number) is expected")
+        elseif type(part.field) == 'string' then
+            for k,v in pairs(box.space[space_id]:format()) do
+                if v.name == part.field then
+                    part.field = k
+                    break
+                end
+            end
+            if type(part.field) == 'string' then
+                box.error(box.error.ILLEGAL_PARAMS,
+                          "options.parts[" .. i .. "]: field was not found by name '" .. part.field .. "'")
+            end
+        elseif part.field == 0 then
+            box.error(box.error.ILLEGAL_PARAMS,
+                      "options.parts[" .. i .. "]: field (number) must be one-based")
+        end
+        if part.type == nil then
+            local fmt = box.space[space_id]:format()[part.field]
+            if fmt and fmt.type then
+                part.type = fmt.type
+            else
+                part.type = 'scalar'
+            end
+        elseif type(part.type) ~= 'string' then
+            box.error(box.error.ILLEGAL_PARAMS,
+                      "options.parts[" .. i .. "]: type (string) is expected")
+        end
+        part.field = part.field - 1
+        table.insert(result, part)
+    end
+    return result
 end
 
 -- Historically, some properties of an index
@@ -541,9 +633,6 @@ box.schema.index.create = function(space_id, name, options)
     end
     options = update_param_table(options, options_defaults)
 
-    check_index_parts(options.parts)
-    options.parts = update_index_parts(options.parts)
-
     local _index = box.space[box.schema.INDEX_ID]
     if _index.index.name:get{space_id, name} then
         if options.if_not_exists then
@@ -567,10 +656,7 @@ box.schema.index.create = function(space_id, name, options)
             end
         end
     end
-    local parts = {}
-    for i = 1, #options.parts, 2 do
-        table.insert(parts, {options.parts[i], options.parts[i + 1]})
-    end
+    local parts = update_index_parts(space_id, options.parts)
     -- create_index() options contains type, parts, etc,
     -- stored separately. Remove these members from index_opts
     local index_opts = {
@@ -591,8 +677,8 @@ box.schema.index.create = function(space_id, name, options)
         ['*'] = 'any';
     };
     for _, part in pairs(parts) do
-        local field_type = part[2]:lower()
-        part[2] = field_type_aliases[field_type] or field_type
+        local field_type = part.type:lower()
+        part.type = field_type_aliases[field_type] or field_type
         if field_type == 'num' then
             log.warn("field type '%s' is deprecated since Tarantool 1.7, "..
                      "please use '%s' instead", field_type, part[2])
@@ -606,8 +692,8 @@ box.schema.index.create = function(space_id, name, options)
             box.error(box.error.MODIFY_INDEX, name, box.space[space_id].name,
                       "sequence cannot be used with a secondary key")
         end
-        if #parts >= 1 and parts[1][2] ~= 'integer' and
-                           parts[1][2] ~= 'unsigned' then
+        if #parts >= 1 and parts[1].type ~= 'integer' and
+                           parts[1].type ~= 'unsigned' then
             box.error(box.error.MODIFY_INDEX, name, box.space[space_id].name,
                       "sequence cannot be used with a non-integer key")
         end
@@ -730,12 +816,7 @@ box.schema.index.alter = function(space_id, index_id, options)
         end
     end
     if options.parts ~= nil then
-        check_index_parts(options.parts)
-        options.parts = update_index_parts(options.parts)
-        parts = {}
-        for i = 1, #options.parts, 2 do
-            table.insert(parts, {options.parts[i], options.parts[i + 1]})
-        end
+        parts = update_index_parts(space_id, options.parts)
     end
     local _space_sequence = box.space[box.schema.SPACE_SEQUENCE_ID]
     local sequence_is_generated = false
@@ -747,8 +828,8 @@ box.schema.index.alter = function(space_id, index_id, options)
                       options.name, box.space[space_id].name,
                       "sequence cannot be used with a secondary key")
         end
-        if #parts >= 1 and parts[1][2] ~= 'integer' and
-                           parts[1][2] ~= 'unsigned' then
+        if #parts >= 1 and parts[1].type ~= 'integer' and
+                           parts[1].type  ~= 'unsigned' then
             box.error(box.error.MODIFY_INDEX,
                       options.name, box.space[space_id].name,
                       "sequence cannot be used with a non-integer key")
@@ -1408,6 +1489,11 @@ box.schema.sequence.drop = function(name, opts)
         end
         return
     end
+    local _priv = box.space[box.schema.PRIV_ID]
+    local privs = _priv.index.object:select{'sequence', id}
+    for k, tuple in pairs(privs) do
+        box.schema.user.revoke(tuple[2], tuple[5], tuple[3], tuple[4])
+    end
     local _sequence = box.space[box.schema.SEQUENCE_ID]
     local _sequence_data = box.space[box.schema.SEQUENCE_DATA_ID]
     _sequence_data:delete{id}
@@ -1480,6 +1566,13 @@ local function object_resolve(object_type, object_name)
             box.error(box.error.NO_SUCH_FUNCTION, object_name)
         end
     end
+    if object_type == 'sequence' then
+        local seq = sequence_resolve(object_name)
+        if seq == nil then
+            box.error(box.error.NO_SUCH_SEQUENCE, object_name)
+        end
+        return seq
+    end
     if object_type == 'role' then
         local _user = box.space[box.schema.USER_ID]
         local role
@@ -1505,6 +1598,8 @@ local function object_name(object_type, object_id)
     local space
     if object_type == 'space' then
         space = box.space._space
+    elseif object_type == 'sequence' then
+        space = box.space._sequence
     elseif object_type == 'function' then
         space = box.space._func
     elseif object_type == 'role' or object_type == 'user' then
@@ -1575,6 +1670,66 @@ function box.schema.func.exists(name_or_id)
 end
 
 box.schema.func.reload = internal.func_reload
+
+box.internal.collation = {}
+box.internal.collation.create = function(name, coll_type, locale, opts)
+    opts = opts or setmap{}
+    if type(name) ~= 'string' then
+        box.error(box.error.ILLEGAL_PARAMS,
+        "name (first arg) must be a string")
+    end
+    if type(coll_type) ~= 'string' then
+        box.error(box.error.ILLEGAL_PARAMS,
+        "type (second arg) must be a string")
+    end
+    if type(locale) ~= 'string' then
+        box.error(box.error.ILLEGAL_PARAMS,
+        "locale (third arg) must be a string")
+    end
+    if type(opts) ~= 'table' then
+        box.error(box.error.ILLEGAL_PARAMS,
+        "options (fourth arg) must be a table or nil")
+    end
+    local lua_opts = {if_not_exists = opts.if_not_exists }
+    check_param_table(lua_opts, {if_not_exists = 'boolean'})
+    opts.if_not_exists = nil
+    opts = setmap(opts)
+
+    local _coll = box.space[box.schema.COLLATION_ID]
+    if lua_opts.if_not_exists then
+        local coll = _coll.index.name:get{name}
+        if coll then
+            return
+        end
+    end
+    _coll:auto_increment{name, session.uid(), coll_type, locale, opts}
+end
+
+box.internal.collation.drop = function(name, opts)
+    opts = opts or {}
+    check_param_table(opts, { if_exists = 'boolean' })
+
+    local _coll = box.space[box.schema.COLLATION_ID]
+    if opts.if_exists then
+        local coll = _coll.index.name:get{name}
+        if not coll then
+            return
+        end
+    end
+    _coll.index.name:delete{name}
+end
+
+box.internal.collation.exists = function(name)
+    local _coll = box.space[box.schema.COLLATION_ID]
+    local coll = _coll.index.name:get{name}
+    return not not coll
+end
+
+box.internal.collation.id_by_name = function(name)
+    local _coll = box.space[box.schema.COLLATION_ID]
+    local coll = _coll.index.name:get{name}
+    return coll[1]
+end
 
 box.schema.user = {}
 

@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <dirent.h>
 
+enum { COPY_FILE_BUF_SIZE = 1024 };
 
 /**
  * A context of libeio request for any
@@ -502,59 +503,56 @@ coio_fdatasync(int fd)
 	return coio_wait_done(req, &eio);
 }
 
-static int
-save_to_buf(char *buf, char *word, size_t *len_buf, size_t *cap_buf){
-	assert(buf && word);
-	assert(len_buf && cap_buf);
-	size_t len = strlen(word) + 1;
-	if (*len_buf + len > *cap_buf) {
-		buf = (char *) realloc(buf, *cap_buf * 2);
-		if (!buf) {
-			return -1;
-		}
-		*cap_buf *= 2;
-	}
-	memcpy(buf, word, len);
-	*len_buf += len;
-	return 0;
-}
-
 static void
 coio_do_readdir(eio_req *req)
 {
 	struct coio_file_task *eio = (struct coio_file_task *)req->data;
 	DIR *dirp = opendir(eio->readdir.pathname);
-	if (!dirp) {
-		req->result = -1;
-		req->errorno = errno;
-		return;
-	}
-	size_t cap_buf = 128;
-	size_t len_buf = 0;
+	if (dirp == NULL)
+		goto error;
+	size_t capacity = 128;
+	size_t len = 0;
 	struct dirent *entry;
-	char *buf = (char *) calloc(cap_buf, sizeof(*buf));
-	if (!buf) {
-		req->result = -1;
-		req->errorno = errno;
-		return;
-	}
+	char *buf = (char *) malloc(capacity);
+	if (buf == NULL)
+		goto mem_error;
 	req->result = 0;
 	do {
 		entry = readdir(dirp);
-		if (entry && entry->d_name &&
-			strcmp(entry->d_name, ".") != 0 &&
-			strcmp(entry->d_name, "..") != 0) {
-			if (save_to_buf(buf + len_buf, entry->d_name, &len_buf, &cap_buf) < 0) {
-				req->result = -1;
-				req->errorno = errno;
-				return;
-			}
-			*(buf + len_buf - 1) = '\n';
-			req->result++;
+		if (entry == NULL || strcmp(entry->d_name, ".") == 0 ||
+		    strcmp(entry->d_name, "..") == 0)
+			continue;
+
+		size_t needed = len + entry->d_namlen + 1;
+		if (needed > capacity) {
+			if (needed <= capacity * 2)
+				capacity *= 2;
+			else
+				capacity = needed * 2;
+			char *new_buf = (char *) realloc(buf, capacity);
+			if (new_buf == NULL)
+				goto mem_error;
+			buf = new_buf;
 		}
-	} while(entry);
-	*(buf + len_buf - 1) = '\0';
+		memcpy(&buf[len], entry->d_name, entry->d_namlen);
+		len += entry->d_namlen;
+		buf[len++] = '\n';
+		req->result++;
+	} while(entry != NULL);
+	if (len > 0)
+		buf[len - 1] = 0;
+	else
+		buf[0] = 0;
 	*eio->readdir.bufp = buf;
+	closedir(dirp);
+	return;
+
+mem_error:
+	free(buf);
+	closedir(dirp);
+error:
+	req->result = -1;
+	req->errorno = errno;
 }
 
 int
@@ -566,35 +564,25 @@ coio_readdir(const char *dir_path, char **buf) {
 	return coio_wait_done(req, &eio);
 }
 
-const size_t BUF_SIZE = 1024;
 static void
 coio_do_copyfile(eio_req *req)
 {
 	struct coio_file_task *eio = (struct coio_file_task *)req->data;
 
 	struct stat st;
-	if (stat(eio->copyfile.source, &st) < 0) {
-		req->errorno = errno;
-		req->result = -1;
-		return;
-	}
+	if (stat(eio->copyfile.source, &st) < 0)
+		goto error;
 
 	int source_fd = open(eio->copyfile.source, O_RDONLY);
-	if (source_fd < 0) {
-		req->errorno = errno;
-		req->result = -1;
-		return;
-	}
+	if (source_fd < 0)
+		goto error;
 
-	int dest_fd = open(eio->copyfile.dest, O_WRONLY | O_CREAT, st.st_mode & 07777);
-	if (dest_fd < 0) {
-		req->errorno = errno;
-		req->result = -1;
-		close(source_fd);
-		return;
-	}
+	int dest_fd = open(eio->copyfile.dest, O_WRONLY | O_CREAT,
+			   st.st_mode & 0777);
+	if (dest_fd < 0)
+		goto dst_fd_error;
 
-	char buf[BUF_SIZE];
+	char buf[COPY_FILE_BUF_SIZE];
 	ssize_t nread;
 	nread = read(source_fd, buf, sizeof(buf));
 	while (nread > 0) {
@@ -608,23 +596,24 @@ coio_do_copyfile(eio_req *req)
 				nread -= nwritten;
 				out_ptr += nwritten;
 			} else if (errno != EINTR) {
-				req->errorno = errno;
-				req->result = -1;
-				close(source_fd);
-				close(dest_fd);
-				return;
+				goto write_error;
 			}
 		} while (nread > 0);
 		nread = read(source_fd, buf, sizeof(buf));
 	}
 	if (nread == 0) {
 		req->result = 0;
-	} else {
-		req->errorno = errno;
-		req->result = -1;
+		close(source_fd);
+		close(dest_fd);
+		return;
 	}
-	close(source_fd);
+write_error:
 	close(dest_fd);
+dst_fd_error:
+	close(source_fd);
+error:
+	req->errorno = errno;
+	req->result = -1;
 }
 
 int

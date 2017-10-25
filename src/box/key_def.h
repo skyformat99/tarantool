@@ -36,6 +36,7 @@
 #include <msgpuck.h>
 #include <limits.h>
 #include "field_def.h"
+#include "coll.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -46,8 +47,12 @@ extern const char *mp_type_strs[];
 
 /** Descriptor of a single part in a multipart key. */
 struct key_part {
+	/** Tuple field index for this part */
 	uint32_t fieldno;
+	/** Type of the tuple field */
 	enum field_type type;
+	/** Collation definition for string comparison */
+	struct coll *coll;
 };
 
 struct key_def;
@@ -154,7 +159,8 @@ key_def_new(uint32_t part_count);
  */
 void
 key_def_set_part(struct key_def *def, uint32_t part_no,
-		 uint32_t fieldno, enum field_type type);
+		 uint32_t fieldno, enum field_type type,
+		 struct coll *coll);
 
 /**
  * An snprint-style function to print a key definition.
@@ -183,12 +189,14 @@ key_def_encode_parts(char *data, const struct key_def *key_def);
  *  resulting values field_no and field_type
  * Parts expected to be a sequence of <part_count> arrays like this:
  *  [NUM, STR, ..][NUM, STR, ..]..,
+ *  OR
+ *  {field=NUM, type=STR, ..}{field=NUM, type=STR, ..}..,
  */
 int
 key_def_decode_parts(struct key_def *key_def, const char **data);
 
 /**
- * 1.6.5-
+ * 1.6.0-1.6.5
  * TODO: Remove it in newer version, find all 1.6.5-
  * Decode parts array from tuple fieldw and write'em to index_def structure.
  * Does not check anything since tuple must be validated before
@@ -196,7 +204,7 @@ key_def_decode_parts(struct key_def *key_def, const char **data);
  *  NUM, STR, NUM, STR, ..,
  */
 int
-key_def_decode_parts_165(struct key_def *key_def, const char **data);
+key_def_decode_parts_160(struct key_def *key_def, const char **data);
 
 /**
  * Returns the part in index_def->parts for the specified fieldno.
@@ -245,6 +253,23 @@ key_def_is_sequential(const struct key_def *key_def)
 			return false;
 	}
 	return true;
+}
+
+/**
+ * Return true if @a key_def defines has fields that requires
+ * special collation comparison.
+ * @param key_def key_def
+ * @retval true if the key_def has collation fields
+ * @retval false otherwise
+ */
+static inline bool
+key_def_has_collation(const struct key_def *key_def)
+{
+	for (uint32_t part_id = 0; part_id < key_def->part_count; part_id++) {
+		if (key_def->parts[part_id].coll != NULL)
+			return true;
+	}
+	return false;
 }
 
 /** A helper table for key_mp_type_validate */

@@ -189,12 +189,12 @@ sc_space_new(uint32_t id, const char *name, struct key_def *key_def,
 		make_scoped_guard([=] { index_def_delete(index_def); });
 	struct space_def *def =
 		space_def_new_xc(id, ADMIN, 0, name, strlen(name), "memtx",
-				 strlen("memtx"), &space_opts_default);
+				 strlen("memtx"), &space_opts_default, NULL, 0);
 	auto def_guard = make_scoped_guard([=] { space_def_delete(def); });
 	struct rlist key_list;
 	rlist_create(&key_list);
 	rlist_add_entry(&key_list, index_def, link);
-	struct space *space = space_new(def, &key_list, NULL, 0);
+	struct space *space = space_new(def, &key_list);
 	(void) space_cache_replace(space);
 	if (replace_trigger)
 		trigger_add(&space->on_replace, replace_trigger);
@@ -210,7 +210,7 @@ sc_space_new(uint32_t id, const char *name, struct key_def *key_def,
 	 *   ensures validation of tuples when starting from
 	 *   a snapshot of older version.
 	 */
-	space->handler->initSystemSpace(space);
+	space->vtab->init_system_space(space);
 
 	trigger_run(&on_alter_space, space);
 }
@@ -272,13 +272,18 @@ schema_init()
 	auto key_def_guard = make_scoped_guard([&] { box_key_def_delete(key_def); });
 
 	key_def_set_part(key_def, 0 /* part no */, 0 /* field no */,
-			 FIELD_TYPE_STRING);
+			 FIELD_TYPE_STRING, NULL);
 	sc_space_new(BOX_SCHEMA_ID, "_schema", key_def, &on_replace_schema,
 		     NULL);
 
 	/* _space - home for all spaces. */
 	key_def_set_part(key_def, 0 /* part no */, 0 /* field no */,
-			 FIELD_TYPE_UNSIGNED);
+			 FIELD_TYPE_UNSIGNED, NULL);
+
+	/* _collation - collation description. */
+	sc_space_new(BOX_COLLATION_ID, "_collation", key_def,
+		     &on_replace_collation, NULL);
+
 	sc_space_new(BOX_SPACE_ID, "_space", key_def,
 		     &alter_space_on_replace_space, &on_stmt_begin_space);
 
@@ -321,10 +326,10 @@ schema_init()
 		diag_raise();
 	/* space no */
 	key_def_set_part(key_def, 0 /* part no */, 0 /* field no */,
-			 FIELD_TYPE_UNSIGNED);
+			 FIELD_TYPE_UNSIGNED, NULL);
 	/* index no */
 	key_def_set_part(key_def, 1 /* part no */, 1 /* field no */,
-			 FIELD_TYPE_UNSIGNED);
+			 FIELD_TYPE_UNSIGNED, NULL);
 	sc_space_new(BOX_INDEX_ID, "_index", key_def,
 		     &alter_space_on_replace_index, &on_stmt_begin_index);
 }

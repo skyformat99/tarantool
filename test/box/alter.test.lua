@@ -66,6 +66,11 @@ _index:insert{_space.id, 0, 'primary', 'tree', 1, 1, 0, 'unsigned'}
 _index:replace{_space.id, 0, 'primary', 'tree', 1, 1, 0, 'unsigned'}
 _index:insert{_index.id, 0, 'primary', 'tree', 1, 2, 0, 'unsigned', 1, 'unsigned'}
 _index:replace{_index.id, 0, 'primary', 'tree', 1, 2, 0, 'unsigned', 1, 'unsigned'}
+-- access_sysview.test changes output of _index:select{}.
+-- let's change _index space in such a way that it will be
+-- uniformn weather access_sysview.test is completed of not.
+box.space._space.index.owner:alter{parts = {2, 'unsigned'}}
+box.space._vspace.index.owner:alter{parts = {2, 'unsigned'}}
 _index:select{}
 -- modify indexes of a system space
 _index:delete{_index.id, 0}
@@ -291,9 +296,6 @@ ts:drop()
 -- gh-2652: validate space format.
 --
 s = box.schema.space.create('test', { format = "format" })
-s = box.schema.space.create('test', { format = { "not_map" } })
-format = { utils.setmap({'unsigned'}) }
-s = box.schema.space.create('test', { format = format })
 format = { { name = 100 } }
 s = box.schema.space.create('test', { format = format })
 long = string.rep('a', box.schema.NAME_MAX + 1)
@@ -367,5 +369,57 @@ s:replace{1, '2', {3, 3}, 4.4, -5, {6, 6}, {value=7}, 8, 9}
 s:replace{1, '2', {3, 3}, 4.4, -5, true, {7}, 8, 9}
 s:replace{1, '2', {3, 3}, 4.4, -5, true, {value=7}}
 s:replace{1, '2', {3, 3}, 4.4, -5, true, {value=7}, 8}
+s:truncate()
 
+--
+-- gh-1014: field names.
+--
+format = {}
+format[1] = {name = 'field1', type = 'unsigned'}
+format[2] = {name = 'field2'}
+format[3] = {name = 'field1'}
+s:format(format)
+
+s:drop()
+
+-- https://github.com/tarantool/tarantool/issues/2815
+-- Extend space format definition syntax
+format = {{name='key',type='unsigned'}, {name='value',type='string'}}
+s = box.schema.space.create('test', { format = format })
+s:format()
+s:format({'id', 'name'})
+s:format()
+s:format({'id', {'name1'}})
+s:format()
+s:format({'id', {'name2', 'string'}})
+s:format()
+s:format({'id', {'name', type = 'string'}})
+s:format()
+s:drop()
+
+format = {'key', {'value',type='string'}}
+s = box.schema.space.create('test', { format = format })
+s:format()
+s:drop()
+
+s = box.schema.space.create('test')
+s:create_index('test', {parts = {'test'}})
+s:create_index('test', {parts = {{'test'}}})
+s:create_index('test', {parts = {{field = 'test'}}})
+s:create_index('test', {parts = {1}}).parts
+s:drop()
+
+s = box.schema.space.create('test')
+s:format{{'test1', 'integer'}, 'test2', {'test3', 'integer'}, {'test4','scalar'}}
+s:create_index('test', {parts = {'test'}})
+s:create_index('test', {parts = {{'test'}}})
+s:create_index('test', {parts = {{field = 'test'}}})
+s:create_index('test1', {parts = {'test1'}}).parts
+s:create_index('test2', {parts = {'test2'}}).parts
+s:create_index('test3', {parts = {{'test1', 'integer'}}}).parts
+s:create_index('test4', {parts = {{'test2', 'integer'}}}).parts
+s:create_index('test5', {parts = {{'test2', 'integer'}}}).parts
+s:create_index('test6', {parts = {1, 3}}).parts
+s:create_index('test7', {parts = {'test1', 4}}).parts
+s:create_index('test8', {parts = {{1, 'integer'}, {'test4', 'scalar'}}}).parts
 s:drop()

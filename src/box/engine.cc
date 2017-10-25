@@ -32,7 +32,6 @@
 
 #include "tuple.h"
 #include "txn.h"
-#include "port.h"
 #include "space.h"
 #include "exception.h"
 #include "small/rlist.h"
@@ -51,6 +50,13 @@ Engine::Engine(const char *engine_name)
 
 void Engine::init()
 {}
+
+struct tuple_format *
+Engine::createFormat(struct key_def **, uint32_t,
+		     struct field_def *, uint32_t, uint32_t)
+{
+	return NULL;
+}
 
 void Engine::begin(struct txn *)
 {}
@@ -134,149 +140,6 @@ void
 Engine::checkSpaceDef(struct space_def * /* def */)
 {
 }
-
-/** {{{ DML */
-
-Handler::Handler(Engine *f)
-	:engine(f)
-{
-}
-
-void
-Handler::applyInitialJoinRow(struct space *, struct request *)
-{
-	tnt_raise(ClientError, ER_UNSUPPORTED, engine->name,
-		  "applySnapshotRow");
-}
-
-struct tuple *
-Handler::executeReplace(struct txn *, struct space *,
-                        struct request *)
-{
-	tnt_raise(ClientError, ER_UNSUPPORTED, engine->name, "replace");
-}
-
-struct tuple *
-Handler::executeDelete(struct txn*, struct space *, struct request *)
-{
-	tnt_raise(ClientError, ER_UNSUPPORTED, engine->name, "delete");
-}
-
-struct tuple *
-Handler::executeUpdate(struct txn*, struct space *, struct request *)
-{
-	tnt_raise(ClientError, ER_UNSUPPORTED, engine->name, "update");
-}
-
-void
-Handler::executeUpsert(struct txn *, struct space *, struct request *)
-{
-	tnt_raise(ClientError, ER_UNSUPPORTED, engine->name, "upsert");
-}
-
-void
-Handler::executeSelect(struct txn *, struct space *space,
-		       uint32_t index_id, uint32_t iterator,
-		       uint32_t offset, uint32_t limit,
-		       const char *key, const char * /* key_end */,
-		       struct port *port)
-{
-	Index *index = index_find_xc(space, index_id);
-
-	uint32_t found = 0;
-	if (iterator >= iterator_type_MAX)
-		tnt_raise(IllegalParams, "Invalid iterator type");
-	enum iterator_type type = (enum iterator_type) iterator;
-
-	uint32_t part_count = key ? mp_decode_array(&key) : 0;
-	if (key_validate(index->index_def, type, key, part_count))
-		diag_raise();
-
-	struct iterator *it = index->allocIterator();
-	IteratorGuard guard(it);
-	index->initIterator(it, type, key, part_count);
-
-	struct tuple *tuple;
-	while (found < limit && (tuple = it->next(it)) != NULL) {
-		if (offset > 0) {
-			offset--;
-			continue;
-		}
-		port_add_tuple_xc(port, tuple);
-		found++;
-	}
-}
-
-/** }}} DML */
-
-/* {{{ DDL  */
-
-void
-Handler::checkIndexDef(struct space *space, struct index_def *index_def)
-{
-	(void) space;
-	(void) index_def;
-	/*
-	 * Don't bother checking index_def to match the view requirements.
-	 * Index::initIterator() must check key on each call.
-	 */
-}
-
-void
-Handler::initSystemSpace(struct space * /* space */)
-{
-	panic("not implemented");
-}
-
-void
-Handler::addPrimaryKey(struct space * /* space */)
-{
-}
-
-void
-Handler::dropPrimaryKey(struct space * /* space */)
-{
-}
-
-void
-Handler::buildSecondaryKey(struct space *, struct space *, Index *)
-{
-	tnt_raise(ClientError, ER_UNSUPPORTED, engine->name, "buildSecondaryKey");
-}
-
-void
-Handler::prepareTruncateSpace(struct space *, struct space *)
-{
-}
-
-void
-Handler::commitTruncateSpace(struct space *, struct space *)
-{
-}
-
-void
-Handler::prepareAlterSpace(struct space *, struct space *)
-{
-}
-
-void
-Handler::commitAlterSpace(struct space *, struct space *)
-{
-}
-
-size_t
-Handler::bsize() const
-{
-	return 0;
-}
-
-struct tuple_format *
-Handler::format()
-{
-	return NULL;
-}
-
-/* }}} DDL */
 
 /* {{{ Engine API */
 

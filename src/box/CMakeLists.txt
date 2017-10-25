@@ -9,6 +9,7 @@ lua_source(lua_sources lua/checkpoint_daemon.lua)
 lua_source(lua_sources lua/net_box.lua)
 lua_source(lua_sources lua/upgrade.lua)
 lua_source(lua_sources lua/console.lua)
+lua_source(lua_sources lua/xlog.lua)
 set(bin_sources)
 bin_source(bin_sources bootstrap.snap bootstrap.h)
 
@@ -36,10 +37,13 @@ add_library(tuple STATIC
     tuple_compare.cc
     tuple_hash.cc
     key_def.cc
+    coll_def.c
+    coll.c
+    coll_cache.c
     field_def.c
     opt_def.c
 )
-target_link_libraries(tuple box_error core ${MSGPUCK_LIBRARIES} misc)
+target_link_libraries(tuple box_error core ${MSGPUCK_LIBRARIES} ${ICU_LIBRARIES} misc bit)
 
 add_library(xlog STATIC xlog.c)
 target_link_libraries(xlog core box_error crc32 ${ZSTD_LIBRARIES})
@@ -83,7 +87,6 @@ add_library(box STATIC
     space.cc
     space_def.c
     sequence.c
-    sequence_iterator.cc
     func.c
     func_def.c
     alter.cc

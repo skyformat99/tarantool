@@ -46,9 +46,10 @@ engine_backup_cb(const char *path, void *arg);
 
 struct Handler;
 struct field_def;
+struct tuple_format;
 
 /** Engine instance */
-class Engine {
+struct Engine {
 public:
 	Engine(const char *engine_name);
 
@@ -57,11 +58,17 @@ public:
 	virtual ~Engine() {}
 	/** Called once at startup. */
 	virtual void init();
-	/** Create a new engine instance for a space. */
-	virtual Handler *createSpace(struct rlist *key_list,
-				     struct field_def *fields,
-				     uint32_t field_count, uint32_t index_count,
-				     uint32_t exact_field_count) = 0;
+	/**
+	 * Construct a tuple format for a new space.
+	 * Returns NULL if the engine does not support format
+	 * (sysview, for example).
+	 */
+	virtual struct tuple_format *
+	createFormat(struct key_def **keys, uint32_t key_count,
+		     struct field_def *fields, uint32_t field_count,
+		     uint32_t exact_field_count);
+	/** Allocate a new space instance. */
+	virtual struct space *createSpace() = 0;
 	/**
 	 * Write statements stored in checkpoint @vclock to @stream.
 	 */
@@ -176,118 +183,6 @@ public:
 	struct rlist link;
 };
 
-/** Engine handle - an operator of a space */
-
-struct Handler {
-public:
-	Handler(Engine *f);
-	virtual ~Handler() {}
-	Handler(const Handler &) = delete;
-	Handler& operator=(const Handler&) = delete;
-
-	virtual void
-	applyInitialJoinRow(struct space *space, struct request *);
-
-	virtual struct tuple *
-	executeReplace(struct txn *, struct space *,
-		       struct request *);
-	virtual struct tuple *
-	executeDelete(struct txn *, struct space *,
-		      struct request *);
-	virtual struct tuple *
-	executeUpdate(struct txn *, struct space *,
-		      struct request *);
-	virtual void
-	executeUpsert(struct txn *, struct space *,
-		      struct request *);
-
-	virtual void
-	executeSelect(struct txn *, struct space *,
-		      uint32_t index_id, uint32_t iterator,
-		      uint32_t offset, uint32_t limit,
-		      const char *key, const char *key_end,
-		      struct port *);
-
-	virtual void initSystemSpace(struct space *space);
-	/**
-	 * Check an index definition for violation of
-	 * various limits.
-	 */
-	virtual void checkIndexDef(struct space *new_space, struct index_def *);
-	/**
-	 * Create an instance of space index. Used in alter
-	 * space before commit to WAL. The created index
-	 * is deleted with delete operator.
-	 */
-	virtual Index *createIndex(struct space *new_space, struct index_def *) = 0;
-	/**
-	 * Called by alter when a primary key added,
-	 * after createIndex is invoked for the new
-	 * key and before the write to WAL.
-	 */
-	virtual void addPrimaryKey(struct space *new_space);
-	/**
-	 * Called by alter when the primary key is dropped.
-	 * Do whatever is necessary with space/handler object,
-	 * to not crash in DML.
-	 */
-	virtual void dropPrimaryKey(struct space *new_space);
-	/**
-	 * Called with the new empty secondary index. Fill the new index
-	 * with data from the primary key of the space.
-	 */
-	virtual void buildSecondaryKey(struct space *old_space,
-				       struct space *new_space,
-				       Index *new_index);
-	/**
-	 * Notify the enigne about upcoming space truncation
-	 * so that it can prepare new_space object.
-	 */
-	virtual void prepareTruncateSpace(struct space *old_space,
-					  struct space *new_space);
-	/**
-	 * Commit space truncation. Called after space truncate
-	 * record was written to WAL hence must not fail.
-	 *
-	 * The old_space is the space that was replaced with the
-	 * new_space as a result of truncation. The callback is
-	 * supposed to release resources associated with the
-	 * old_space and commit the new_space.
-	 */
-	virtual void commitTruncateSpace(struct space *old_space,
-					 struct space *new_space);
-	/**
-	 * Notify the engine about the changed space,
-	 * before it's done, to prepare 'new_space'
-	 * object.
-	 */
-	virtual void prepareAlterSpace(struct space *old_space,
-				       struct space *new_space);
-
-	/**
-	 * Notify the engine engine after altering a space and
-	 * replacing old_space with new_space in the space cache,
-	 * to, e.g., update all references to struct space
-	 * and replace old_space with new_space.
-	 */
-	virtual void commitAlterSpace(struct space *old_space,
-				      struct space *new_space);
-
-	/** Binary size of a space. */
-	virtual size_t
-	bsize() const;
-	/**
-	 * Get format of a space.
-	 * @retval not NULL Space format.
-	 * @retval     NULL Space has no format (Sysview engine,
-	 *         for example).
-	 */
-	virtual struct tuple_format *
-	format();
-
-	Engine *engine;
-};
-
 /** Register engine engine instance. */
 void engine_register(Engine *engine);
 
@@ -299,12 +194,6 @@ Engine *engine_find(const char *name);
 
 /** Shutdown all engine factories. */
 void engine_shutdown();
-
-static inline uint32_t
-engine_id(Handler *space)
-{
-	return space->engine->id;
-}
 
 /**
  * Initialize an empty data directory

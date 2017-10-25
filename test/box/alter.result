@@ -170,14 +170,25 @@ _index:replace{_index.id, 0, 'primary', 'tree', 1, 2, 0, 'unsigned', 1, 'unsigne
 ---
 - [288, 0, 'primary', 'tree', 1, 2, 0, 'unsigned', 1, 'unsigned']
 ...
+-- access_sysview.test changes output of _index:select{}.
+-- let's change _index space in such a way that it will be
+-- uniformn weather access_sysview.test is completed of not.
+box.space._space.index.owner:alter{parts = {2, 'unsigned'}}
+---
+...
+box.space._vspace.index.owner:alter{parts = {2, 'unsigned'}}
+---
+...
 _index:select{}
 ---
 - - [272, 0, 'primary', 'tree', {'unique': true}, [[0, 'string']]]
+  - [276, 0, 'primary', 'tree', {'unique': true}, [[0, 'unsigned']]]
+  - [276, 1, 'name', 'tree', {'unique': true}, [[1, 'string']]]
   - [280, 0, 'primary', 'tree', 1, 1, 0, 'unsigned']
-  - [280, 1, 'owner', 'tree', {'unique': false}, [[1, 'unsigned']]]
+  - [280, 1, 'owner', 'tree', {'unique': false}, [{'field': 1, 'type': 'unsigned'}]]
   - [280, 2, 'name', 'tree', {'unique': true}, [[2, 'string']]]
   - [281, 0, 'primary', 'tree', {'unique': true}, [[0, 'unsigned']]]
-  - [281, 1, 'owner', 'tree', {'unique': false}, [[1, 'unsigned']]]
+  - [281, 1, 'owner', 'tree', {'unique': false}, [{'field': 1, 'type': 'unsigned'}]]
   - [281, 2, 'name', 'tree', {'unique': true}, [[2, 'string']]]
   - [284, 0, 'primary', 'tree', {'unique': true}, [[0, 'unsigned']]]
   - [284, 1, 'owner', 'tree', {'unique': false}, [[1, 'unsigned']]]
@@ -444,8 +455,7 @@ index = s:create_index('primary', {unique = true, parts = {0, 'unsigned', 1, 'st
 ...
 index = s:create_index('primary', {unique = true, parts = {'unsigned', 1, 'string', 2}})
 ---
-- error: 'Illegal parameters, options.parts: expected field_no (number), type (string)
-    pairs'
+- error: 'Illegal parameters, options.parts[1]: field was not found by name ''unsigned'''
 ...
 index = s:create_index('primary', {unique = true, parts = 'bug'})
 ---
@@ -505,7 +515,7 @@ space.index.primary.parts[2].type == 'string'
 ...
 box.space._index:get({space.id, 0})[6]
 ---
-- [[0, 'number'], [1, 'string']]
+- [{'field': 0, 'type': 'number'}, {'field': 1, 'type': 'string'}]
 ...
 space:drop()
 ---
@@ -533,7 +543,8 @@ space.index.primary.parts[3].type == 'string'
 ...
 box.space._index:get({space.id, 0})[6]
 ---
-- [[0, 'unsigned'], [1, 'integer'], [2, 'string']]
+- [{'field': 0, 'type': 'unsigned'}, {'field': 1, 'type': 'integer'}, {'field': 2,
+    'type': 'string'}]
 ...
 space:drop()
 ---
@@ -554,7 +565,7 @@ space.index.primary.parts[1].type == 'unsigned'
 ...
 box.space._index:get({space.id, 0})[6]
 ---
-- [[0, 'unsigned']]
+- [{'field': 0, 'type': 'unsigned'}]
 ...
 space:drop()
 ---
@@ -756,23 +767,12 @@ s = box.schema.space.create('test', { format = "format" })
 ---
 - error: Illegal parameters, options parameter 'format' should be of type table
 ...
-s = box.schema.space.create('test', { format = { "not_map" } })
----
-- error: 'Failed to create space ''test'': field 1 is not map'
-...
-format = { utils.setmap({'unsigned'}) }
----
-...
-s = box.schema.space.create('test', { format = format })
----
-- error: 'Failed to create space ''test'': field 1 format is not map with string keys'
-...
 format = { { name = 100 } }
 ---
 ...
 s = box.schema.space.create('test', { format = format })
 ---
-- error: 'Wrong space format (field 1): ''name'' must be string'
+- error: 'Illegal parameters, format[1]: name (string) is expected'
 ...
 long = string.rep('a', box.schema.NAME_MAX + 1)
 ---
@@ -796,7 +796,7 @@ format = { utils.setmap({}) }
 ...
 s = box.schema.space.create('test', { format = format })
 ---
-- error: 'Failed to create space ''test'': field 1 name is not specified'
+- error: 'Illegal parameters, format[1]: name (string) is expected'
 ...
 -- Ensure the format is updated after index drop.
 format = { { name = 'id', type = 'unsigned' } }
@@ -985,6 +985,174 @@ s:replace{1, '2', {3, 3}, 4.4, -5, true, {value=7}}
 s:replace{1, '2', {3, 3}, 4.4, -5, true, {value=7}, 8}
 ---
 - error: Tuple field count 8 is less than required by a defined index (expected 9)
+...
+s:truncate()
+---
+...
+--
+-- gh-1014: field names.
+--
+format = {}
+---
+...
+format[1] = {name = 'field1', type = 'unsigned'}
+---
+...
+format[2] = {name = 'field2'}
+---
+...
+format[3] = {name = 'field1'}
+---
+...
+s:format(format)
+---
+- error: Space field 'field1' is duplicate
+...
+s:drop()
+---
+...
+-- https://github.com/tarantool/tarantool/issues/2815
+-- Extend space format definition syntax
+format = {{name='key',type='unsigned'}, {name='value',type='string'}}
+---
+...
+s = box.schema.space.create('test', { format = format })
+---
+...
+s:format()
+---
+- [{'name': 'key', 'type': 'unsigned'}, {'name': 'value', 'type': 'string'}]
+...
+s:format({'id', 'name'})
+---
+...
+s:format()
+---
+- [{'name': 'id', 'type': 'any'}, {'name': 'name', 'type': 'any'}]
+...
+s:format({'id', {'name1'}})
+---
+...
+s:format()
+---
+- [{'name': 'id', 'type': 'any'}, {'name': 'name1', 'type': 'any'}]
+...
+s:format({'id', {'name2', 'string'}})
+---
+...
+s:format()
+---
+- [{'name': 'id', 'type': 'any'}, {'name': 'name2', 'type': 'string'}]
+...
+s:format({'id', {'name', type = 'string'}})
+---
+...
+s:format()
+---
+- [{'name': 'id', 'type': 'any'}, {'name': 'name', 'type': 'string'}]
+...
+s:drop()
+---
+...
+format = {'key', {'value',type='string'}}
+---
+...
+s = box.schema.space.create('test', { format = format })
+---
+...
+s:format()
+---
+- [{'name': 'key', 'type': 'any'}, {'name': 'value', 'type': 'string'}]
+...
+s:drop()
+---
+...
+s = box.schema.space.create('test')
+---
+...
+s:create_index('test', {parts = {'test'}})
+---
+- error: 'Illegal parameters, options.parts[1]: field was not found by name ''test'''
+...
+s:create_index('test', {parts = {{'test'}}})
+---
+- error: 'Illegal parameters, options.parts[1]: field was not found by name ''test'''
+...
+s:create_index('test', {parts = {{field = 'test'}}})
+---
+- error: 'Illegal parameters, options.parts[1]: field was not found by name ''test'''
+...
+s:create_index('test', {parts = {1}}).parts
+---
+- - type: scalar
+    fieldno: 1
+...
+s:drop()
+---
+...
+s = box.schema.space.create('test')
+---
+...
+s:format{{'test1', 'integer'}, 'test2', {'test3', 'integer'}, {'test4','scalar'}}
+---
+...
+s:create_index('test', {parts = {'test'}})
+---
+- error: 'Illegal parameters, options.parts[1]: field was not found by name ''test'''
+...
+s:create_index('test', {parts = {{'test'}}})
+---
+- error: 'Illegal parameters, options.parts[1]: field was not found by name ''test'''
+...
+s:create_index('test', {parts = {{field = 'test'}}})
+---
+- error: 'Illegal parameters, options.parts[1]: field was not found by name ''test'''
+...
+s:create_index('test1', {parts = {'test1'}}).parts
+---
+- - type: integer
+    fieldno: 1
+...
+s:create_index('test2', {parts = {'test2'}}).parts
+---
+- error: 'Can''t create or modify index ''test2'' in space ''test'': field type ''any''
+    is not supported'
+...
+s:create_index('test3', {parts = {{'test1', 'integer'}}}).parts
+---
+- - type: integer
+    fieldno: 1
+...
+s:create_index('test4', {parts = {{'test2', 'integer'}}}).parts
+---
+- - type: integer
+    fieldno: 2
+...
+s:create_index('test5', {parts = {{'test2', 'integer'}}}).parts
+---
+- - type: integer
+    fieldno: 2
+...
+s:create_index('test6', {parts = {1, 3}}).parts
+---
+- - type: integer
+    fieldno: 1
+  - type: integer
+    fieldno: 3
+...
+s:create_index('test7', {parts = {'test1', 4}}).parts
+---
+- - type: integer
+    fieldno: 1
+  - type: scalar
+    fieldno: 4
+...
+s:create_index('test8', {parts = {{1, 'integer'}, {'test4', 'scalar'}}}).parts
+---
+- - type: integer
+    fieldno: 1
+  - type: scalar
+    fieldno: 4
 ...
 s:drop()
 ---

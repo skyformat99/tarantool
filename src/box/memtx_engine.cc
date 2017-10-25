@@ -77,13 +77,13 @@ txn_on_yield_or_stop(struct trigger * /* trigger */, void * /* event */)
 static void
 memtx_end_build_primary_key(struct space *space, void *param)
 {
-	struct MemtxSpace *handler = (struct MemtxSpace *) space->handler;
-	if (handler->engine != param || space_index(space, 0) == NULL ||
-	    handler->replace == memtx_replace_all_keys)
+	struct memtx_space *memtx_space = (struct memtx_space *)space;
+	if (space->engine != param || space_index(space, 0) == NULL ||
+	    memtx_space->replace == memtx_space_replace_all_keys)
 		return;
 
 	((MemtxIndex *) space->index[0])->endBuild();
-	handler->replace = memtx_replace_primary_key;
+	memtx_space->replace = memtx_space_replace_primary_key;
 }
 
 /**
@@ -95,9 +95,9 @@ memtx_end_build_primary_key(struct space *space, void *param)
 void
 memtx_build_secondary_keys(struct space *space, void *param)
 {
-	struct MemtxSpace *handler = (struct MemtxSpace *) space->handler;
-	if (handler->engine != param || space_index(space, 0) == NULL ||
-	    handler->replace == memtx_replace_all_keys)
+	struct memtx_space *memtx_space = (struct memtx_space *)space;
+	if (space->engine != param || space_index(space, 0) == NULL ||
+	    memtx_space->replace == memtx_space_replace_all_keys)
 		return;
 
 	if (space->index_id_max > 0) {
@@ -116,7 +116,7 @@ memtx_build_secondary_keys(struct space *space, void *param)
 			say_info("Space '%s': done", space_name(space));
 		}
 	}
-	handler->replace = memtx_replace_all_keys;
+	memtx_space->replace = memtx_space_replace_all_keys;
 }
 
 MemtxEngine::MemtxEngine(const char *snap_dirname, bool force_recovery,
@@ -190,7 +190,7 @@ MemtxEngine::recoverSnapshot(const struct vclock *vclock)
 	 * marker - such snapshots are very likely corrupted and
 	 * should not be trusted.
 	 */
-	if (cursor.state != XLOG_CURSOR_EOF)
+	if (!xlog_cursor_is_eof(&cursor))
 		panic("snapshot `%s' has no EOF marker", filename);
 
 }
@@ -207,10 +207,10 @@ MemtxEngine::recoverSnapshotRow(struct xrow_header *row)
 	struct request *request = xrow_decode_dml_gc_xc(row);
 	struct space *space = space_cache_find(request->space_id);
 	/* memtx snapshot must contain only memtx spaces */
-	if (space->handler->engine != this)
+	if (space->engine != this)
 		tnt_raise(ClientError, ER_CROSS_ENGINE_TRANSACTION);
 	/* no access checks here - applier always works with admin privs */
-	space->handler->applyInitialJoinRow(space, request);
+	space->vtab->apply_initial_join_row(space, request);
 	/*
 	 * Don't let gc pool grow too much. Yet to
 	 * it before reading the next row, to make
@@ -282,29 +282,30 @@ MemtxEngine::endRecovery()
 	}
 }
 
-Handler *MemtxEngine::createSpace(struct rlist *key_list,
-				  struct field_def *fields,
-				  uint32_t field_count, uint32_t index_count,
-				  uint32_t exact_field_count)
+struct tuple_format *
+MemtxEngine::createFormat(struct key_def **keys, uint32_t key_count,
+			  struct field_def *fields, uint32_t field_count,
+			  uint32_t exact_field_count)
 {
-	struct index_def *index_def;
-	uint32_t key_no = 0;
-	struct key_def **keys =
-		(struct key_def **)region_alloc_xc(&fiber()->gc,
-						   sizeof(*keys) * index_count);
-
-	rlist_foreach_entry(index_def, key_list, link)
-			keys[key_no++] = index_def->key_def;
-
-	struct tuple_format *format =
-		tuple_format_new(&memtx_tuple_format_vtab, keys, index_count, 0,
-				 fields, field_count);
+	struct tuple_format *format = tuple_format_new(&memtx_tuple_format_vtab,
+						       keys, key_count, 0,
+						       fields, field_count);
 	if (format == NULL)
 		diag_raise();
-	tuple_format_ref(format);
 	format->exact_field_count = exact_field_count;
-	auto format_guard = make_scoped_guard([=] { tuple_format_unref(format); });
-	return new MemtxSpace(this, format);
+	return format;
+}
+
+struct space *MemtxEngine::createSpace()
+{
+	struct memtx_space *memtx_space = (struct memtx_space *)
+		calloc(1, sizeof(*memtx_space));
+	if (memtx_space == NULL)
+		tnt_raise(OutOfMemory, sizeof(*memtx_space),
+			  "malloc", "struct memtx_space");
+	memtx_space->base.vtab = &memtx_space_vtab;
+	memtx_space->replace = memtx_space_replace_no_keys;
+	return &memtx_space->base;
 }
 
 void
@@ -352,15 +353,15 @@ MemtxEngine::rollbackStatement(struct txn *, struct txn_stmt *stmt)
 	if (stmt->old_tuple == NULL && stmt->new_tuple == NULL)
 		return;
 	struct space *space = stmt->space;
+	struct memtx_space *memtx_space = (struct memtx_space *)space;
 	int index_count;
-	struct MemtxSpace *handler = (struct MemtxSpace *) space->handler;
 
 	/* Only roll back the changes if they were made. */
 	if (stmt->engine_savepoint == NULL)
 		index_count = 0;
-	else if (handler->replace == memtx_replace_all_keys)
+	else if (memtx_space->replace == memtx_space_replace_all_keys)
 		index_count = space->index_count;
-	else if (handler->replace == memtx_replace_primary_key)
+	else if (memtx_space->replace == memtx_space_replace_primary_key)
 		index_count = 1;
 	else
 		panic("transaction rolled back during snapshot recovery");
@@ -371,7 +372,8 @@ MemtxEngine::rollbackStatement(struct txn *, struct txn_stmt *stmt)
 	}
 	/** Reset to old bsize, if it was changed. */
 	if (stmt->engine_savepoint != NULL)
-		handler->updateBsize(stmt->new_tuple, stmt->old_tuple);
+		memtx_space_update_bsize(space, stmt->new_tuple,
+					 stmt->old_tuple);
 
 	if (stmt->new_tuple)
 		tuple_unref(stmt->new_tuple);
@@ -766,9 +768,8 @@ memtx_initial_join_f(va_list ap)
 	 * should not be trusted.
 	 */
 	/* TODO: replace panic with tnt_raise() */
-	if (cursor.state != XLOG_CURSOR_EOF)
-		panic("snapshot `%s' has no EOF marker",
-		      cursor.name);
+	if (!xlog_cursor_is_eof(&cursor))
+		panic("snapshot `%s' has no EOF marker", cursor.name);
 	return 0;
 }
 

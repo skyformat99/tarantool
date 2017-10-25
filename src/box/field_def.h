@@ -32,6 +32,7 @@
  */
 
 #include <stdint.h>
+#include <stdbool.h>
 #include "opt_def.h"
 
 #if defined(__cplusplus)
@@ -86,19 +87,6 @@ struct field_def {
 	enum field_type type;
 	/** 0-terminated field name. */
 	char *name;
-	/**
-	 * Offset slot in field map in tuple. Normally tuple
-	 * stores field map - offsets of all fields participating
-	 * in indexes. This allows quick access to most used
-	 * fields without parsing entire mspack. This member
-	 * stores position in the field map of tuple for current
-	 * field. If the field does not participate in indexes
-	 * then it has no offset in field map and INT_MAX is
-	 * stored in this member. Due to specific field map in
-	 * tuple (it is stored before tuple), the positions in
-	 * field map is negative.
-	 */
-	int32_t offset_slot;
 };
 
 #if defined(__cplusplus)

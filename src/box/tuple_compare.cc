@@ -32,6 +32,7 @@
 #include "tuple.h"
 #include "trivia/util.h" /* NOINLINE */
 #include <math.h>
+#include "coll_def.h"
 
 /* {{{ tuple_compare */
 
@@ -86,10 +87,9 @@ mp_compare_bool(const char *field_a, const char *field_b)
 }
 
 static int
-mp_compare_integer(const char *field_a, const char *field_b)
+mp_compare_integer_with_hint(const char *field_a, enum mp_type a_type,
+			     const char *field_b, enum mp_type b_type)
 {
-	enum mp_type a_type = mp_typeof(*field_a);
-	enum mp_type b_type = mp_typeof(*field_b);
 	assert(mp_classof(a_type) == MP_CLASS_NUMBER);
 	assert(mp_classof(b_type) == MP_CLASS_NUMBER);
 	if (a_type == MP_UINT) {
@@ -245,10 +245,9 @@ mp_compare_double_any_number(double lhs, const char *rhs,
 }
 
 static int
-mp_compare_number(const char *lhs, const char *rhs)
+mp_compare_number_with_hint(const char *lhs, enum mp_type lhs_type,
+			    const char *rhs, enum mp_type rhs_type)
 {
-	enum mp_type lhs_type = mp_typeof(*lhs);
-	enum mp_type rhs_type = mp_typeof(*rhs);
 	assert(mp_classof(lhs_type) == MP_CLASS_NUMBER);
 	assert(mp_classof(rhs_type) == MP_CLASS_NUMBER);
 
@@ -274,7 +273,14 @@ mp_compare_number(const char *lhs, const char *rhs)
 		);
 	}
 	assert(lhs_type == MP_INT || lhs_type == MP_UINT);
-	return mp_compare_integer(lhs, rhs);
+	return mp_compare_integer_with_hint(lhs, lhs_type, rhs, rhs_type);
+}
+
+static inline int
+mp_compare_number(const char *lhs, const char *rhs)
+{
+	return mp_compare_number_with_hint(lhs, mp_typeof(*lhs),
+					   rhs, mp_typeof(*rhs));
 }
 
 static inline int
@@ -286,6 +292,15 @@ mp_compare_str(const char *field_a, const char *field_b)
 	if (r != 0)
 		return r;
 	return COMPARE_RESULT(size_a, size_b);
+}
+
+static inline int
+mp_compare_str_coll(const char *field_a, const char *field_b,
+		    struct coll *coll)
+{
+	uint32_t size_a = mp_decode_strl(&field_a);
+	uint32_t size_b = mp_decode_strl(&field_b);
+	return coll->cmp(field_a, size_a, field_b, size_b, coll);
 }
 
 static inline int
@@ -311,10 +326,9 @@ static mp_compare_f mp_class_comparators[] = {
 };
 
 static int
-mp_compare_scalar(const char *field_a, const char *field_b)
+mp_compare_scalar_with_hint(const char *field_a, enum mp_type a_type,
+			    const char *field_b, enum mp_type b_type)
 {
-	enum mp_type a_type = mp_typeof(*field_a);
-	enum mp_type b_type = mp_typeof(*field_b);
 	enum mp_class a_class = mp_classof(a_type);
 	enum mp_class b_class = mp_classof(b_type);
 	if (a_class != b_class)
@@ -322,6 +336,13 @@ mp_compare_scalar(const char *field_a, const char *field_b)
 	mp_compare_f cmp = mp_class_comparators[a_class];
 	assert(cmp != NULL);
 	return cmp(field_a, field_b);
+}
+
+static inline int
+mp_compare_scalar(const char *field_a, const char *field_b)
+{
+	return mp_compare_scalar_with_hint(field_a, mp_typeof(*field_a),
+					   field_b, mp_typeof(*field_b));
 }
 
 /**
@@ -335,15 +356,20 @@ mp_compare_scalar(const char *field_a, const char *field_b)
  */
 static int
 tuple_compare_field(const char *field_a, const char *field_b,
-		    int8_t type)
+		    int8_t type, struct coll *coll)
 {
 	switch (type) {
 	case FIELD_TYPE_UNSIGNED:
 		return mp_compare_uint(field_a, field_b);
 	case FIELD_TYPE_STRING:
-		return mp_compare_str(field_a, field_b);
+		return coll != NULL ?
+		       mp_compare_str_coll(field_a, field_b, coll) :
+		       mp_compare_str(field_a, field_b);
 	case FIELD_TYPE_INTEGER:
-		return mp_compare_integer(field_a, field_b);
+		return mp_compare_integer_with_hint(field_a,
+						    mp_typeof(*field_a),
+						    field_b,
+						    mp_typeof(*field_b));
 	case FIELD_TYPE_NUMBER:
 		return mp_compare_number(field_a, field_b);
 	case FIELD_TYPE_BOOLEAN:
@@ -367,7 +393,8 @@ tuple_compare_slowpath_raw(const struct tuple_format *format_a,
 	if (key_def->part_count == 1 && part->fieldno == 0) {
 		mp_decode_array(&tuple_a);
 		mp_decode_array(&tuple_b);
-		return tuple_compare_field(tuple_a, tuple_b, part->type);
+		return tuple_compare_field(tuple_a, tuple_b,
+					   part->type, part->coll);
 	}
 
 	const struct key_part *end = part + key_def->part_count;
@@ -381,7 +408,8 @@ tuple_compare_slowpath_raw(const struct tuple_format *format_a,
 		field_b = tuple_field_raw(format_b, tuple_b, field_map_b,
 					  part->fieldno);
 		assert(field_a != NULL && field_b != NULL);
-		if ((r = tuple_compare_field(field_a, field_b, part->type)))
+		if ((r = tuple_compare_field(field_a, field_b,
+					     part->type, part->coll)))
 			break;
 	}
 	return r;
@@ -406,11 +434,13 @@ key_compare_parts(const char *key_a, const char *key_b, uint32_t part_count,
 	assert((key_a != NULL && key_b != NULL) || part_count == 0);
 	const struct key_part *part = parts;
 	if (likely(part_count == 1))
-		return tuple_compare_field(key_a, key_b, part->type);
+		return tuple_compare_field(key_a, key_b,
+					   part->type, part->coll);
 	const struct key_part *end = part + part_count;
 	int r = 0; /* Part count can be 0 in wildcard searches. */
 	for (; part < end; part++) {
-		r = tuple_compare_field(key_a, key_b, part->type);
+		r = tuple_compare_field(key_a, key_b,
+					part->type, part->coll);
 		if (r != 0)
 			break;
 		mp_next(&key_a);
@@ -477,7 +507,8 @@ tuple_compare_with_key_slowpath_raw(const struct tuple_format *format,
 		const char *field;
 		field = tuple_field_raw(format, tuple, field_map,
 					part->fieldno);
-		return tuple_compare_field(field, key, part->type);
+		return tuple_compare_field(field, key,
+					   part->type, part->coll);
 	}
 
 	const struct key_part *end = part + MIN(part_count, key_def->part_count);
@@ -486,7 +517,8 @@ tuple_compare_with_key_slowpath_raw(const struct tuple_format *format,
 		const char *field;
 		field = tuple_field_raw(format, tuple, field_map,
 					part->fieldno);
-		r = tuple_compare_field(field, key, part->type);
+		r = tuple_compare_field(field, key,
+					part->type, part->coll);
 		if (r != 0)
 			break;
 		mp_next(&key);
@@ -686,14 +718,21 @@ static const comparator_signature cmp_arr[] = {
 
 tuple_compare_t
 tuple_compare_create(const struct key_def *def) {
-	for (uint32_t k = 0; k < sizeof(cmp_arr) / sizeof(cmp_arr[0]); k++) {
-		uint32_t i = 0;
-		for (; i < def->part_count; i++)
-			if (def->parts[i].fieldno != cmp_arr[k].p[i * 2] ||
-			    def->parts[i].type != cmp_arr[k].p[i * 2 + 1])
-				break;
-		if (i == def->part_count && cmp_arr[k].p[i * 2] == UINT32_MAX)
-			return cmp_arr[k].f;
+	if (!key_def_has_collation(def)) {
+		/* Precalculated comparators don't use collation */
+		for (uint32_t k = 0;
+		     k < sizeof(cmp_arr) / sizeof(cmp_arr[0]); k++) {
+			uint32_t i = 0;
+			for (; i < def->part_count; i++)
+				if (def->parts[i].fieldno !=
+				    cmp_arr[k].p[i * 2] ||
+				    def->parts[i].type !=
+				    cmp_arr[k].p[i * 2 + 1])
+					break;
+			if (i == def->part_count &&
+			    cmp_arr[k].p[i * 2] == UINT32_MAX)
+				return cmp_arr[k].f;
+		}
 	}
 	if (key_def_is_sequential(def))
 		return tuple_compare_sequential;
@@ -882,19 +921,24 @@ static const comparator_with_key_signature cmp_wk_arr[] = {
 tuple_compare_with_key_t
 tuple_compare_with_key_create(const struct key_def *def)
 {
-	for (uint32_t k = 0;
-	     k < sizeof(cmp_wk_arr) / sizeof(cmp_wk_arr[0]);
-	     k++) {
+	if (!key_def_has_collation(def)) {
+		/* Precalculated comparators don't use collation */
+		for (uint32_t k = 0;
+		     k < sizeof(cmp_wk_arr) / sizeof(cmp_wk_arr[0]);
+		     k++) {
 
-		uint32_t i = 0;
-		for (; i < def->part_count; i++) {
-			if (def->parts[i].fieldno != cmp_wk_arr[k].p[i * 2] ||
-			    def->parts[i].type != cmp_wk_arr[k].p[i * 2 + 1]) {
-				break;
+			uint32_t i = 0;
+			for (; i < def->part_count; i++) {
+				if (def->parts[i].fieldno !=
+				    cmp_wk_arr[k].p[i * 2] ||
+				    def->parts[i].type !=
+				    cmp_wk_arr[k].p[i * 2 + 1]) {
+					break;
+				}
 			}
+			if (i == def->part_count)
+				return cmp_wk_arr[k].f;
 		}
-		if (i == def->part_count)
-			return cmp_wk_arr[k].f;
 	}
 	if (key_def_is_sequential(def))
 		return tuple_compare_with_key_sequential;

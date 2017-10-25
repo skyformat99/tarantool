@@ -54,7 +54,6 @@ enum { FORMAT_REF_MAX = INT32_MAX};
  * message
  */
 enum { TUPLE_INDEX_BASE = 1 };
-
 /*
  * A special value to indicate that tuple format doesn't store
  * an offset for a field_id.
@@ -70,6 +69,39 @@ struct tuple_format_vtab {
 	void
 	(*destroy)(struct tuple_format *format, struct tuple *tuple);
 };
+
+/** Tuple field meta information for tuple_format. */
+struct tuple_field {
+	/**
+	 * Field type of an indexed field.
+	 * If a field participates in at least one of space indexes
+	 * then its type is stored in this member.
+	 * If a field does not participate in an index
+	 * then UNKNOWN is stored for it.
+	 */
+	enum field_type type;
+	/**
+	 * Offset slot in field map in tuple. Normally tuple
+	 * stores field map - offsets of all fields participating
+	 * in indexes. This allows quick access to most used
+	 * fields without parsing entire mspack. This member
+	 * stores position in the field map of tuple for current
+	 * field. If the field does not participate in indexes
+	 * then it has no offset in field map and INT_MAX is
+	 * stored in this member. Due to specific field map in
+	 * tuple (it is stored before tuple), the positions in
+	 * field map is negative.
+	 */
+	int32_t offset_slot;
+	/** True if this field is used by an index. */
+	bool is_key_part;
+	/** Tuple field name, specified by a user. Can be NULL. */
+	char *name;
+};
+
+struct mh_strnu32_t;
+typedef uint32_t (*field_name_hash_f)(const char *str, uint32_t len);
+extern field_name_hash_f field_name_hash;
 
 /**
  * @brief Tuple format
@@ -98,10 +130,17 @@ struct tuple_format {
 	 * fields. If set, each tuple must have exactly this number of fields.
 	 */
 	uint32_t exact_field_count;
+	/**
+	 * The longest field array prefix in which the last
+	 * element is used by an index.
+	 */
+	uint32_t index_field_count;
 	/* Length of 'fields' array. */
 	uint32_t field_count;
+	/** Field names hash. Key - name, value - field number. */
+	struct mh_strnu32_t *names;
 	/* Formats of the fields */
-	struct field_def fields[0];
+	struct tuple_field fields[0];
 };
 
 extern struct tuple_format **tuple_formats;
@@ -151,9 +190,10 @@ tuple_format_unref(struct tuple_format *format)
  * @retval     NULL Memory error.
  */
 struct tuple_format *
-tuple_format_new(struct tuple_format_vtab *vtab, struct key_def **keys,
+tuple_format_new(struct tuple_format_vtab *vtab, struct key_def * const *keys,
 		 uint16_t key_count, uint16_t extra_size,
-		 struct field_def *space_fields, uint32_t space_field_count);
+		 const struct field_def *space_fields,
+		 uint32_t space_field_count);
 
 /**
  * Check that two tuple formats are identical.
@@ -274,6 +314,23 @@ tuple_field_raw(const struct tuple_format *format, const char *tuple,
 		mp_next(&tuple);
 	return tuple;
 }
+
+/**
+ * Get tuple field by its name.
+ * @param format Tuple format.
+ * @param tuple MessagePack tuple's body.
+ * @param field_map Tuple field map.
+ * @param name Field name.
+ * @param name_len Length of @a name.
+ * @param name_hash Hash of @a name.
+ *
+ * @retval not NULL MessagePack field.
+ * @retval     NULL No field with @a name.
+ */
+const char *
+tuple_field_raw_by_name(struct tuple_format *format, const char *tuple,
+			const uint32_t *field_map, const char *name,
+			uint32_t name_len, uint32_t name_hash);
 
 #if defined(__cplusplus)
 } /* extern "C" */

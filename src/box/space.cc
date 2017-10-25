@@ -37,6 +37,7 @@
 #include "trigger.h"
 #include "user.h"
 #include "session.h"
+#include "port.h"
 
 void
 access_check_space(struct space *space, uint8_t access)
@@ -78,45 +79,50 @@ space_fill_index_map(struct space *space)
 }
 
 struct space *
-space_new(struct space_def *def, struct rlist *key_list,
-	  struct field_def *fields, uint32_t field_count)
+space_new(struct space_def *def, struct rlist *key_list)
 {
 	uint32_t index_id_max = 0;
 	uint32_t index_count = 0;
 	struct index_def *index_def;
 	MAYBE_UNUSED struct index_def *pk = rlist_empty(key_list) ? NULL :
 		rlist_first_entry(key_list, struct index_def, link);
-	def = space_def_dup_xc(def);
 	rlist_foreach_entry(index_def, key_list, link) {
 		index_count++;
 		index_id_max = MAX(index_id_max, index_def->iid);
 	}
 	/* A space with a secondary key without a primary is illegal. */
 	assert(index_count == 0 || pk->iid == 0);
-	size_t sz = sizeof(struct space) +
-		(index_count + index_id_max + 1) * sizeof(Index *);
-	struct space *space = (struct space *) calloc(1, sz);
-	if (space == NULL) {
-		space_def_delete(def);
-		tnt_raise(OutOfMemory, sz, "malloc", "struct space");
-	}
-	space->def = def;
+	/* Allocate a space engine instance. */
+	Engine *engine = engine_find(def->engine_name);
+	struct space *space = engine->createSpace();
+	auto scoped_guard = make_scoped_guard([=] { space_delete(space); });
+	space->engine = engine;
 	space->index_count = index_count;
 	space->index_id_max = index_id_max;
 	rlist_create(&space->on_replace);
 	rlist_create(&space->on_stmt_begin);
-	auto scoped_guard = make_scoped_guard([=] { space_delete(space); });
-
-	space->index_map = (Index **)((char *) space + sizeof(*space) +
-				      index_count * sizeof(Index *));
-	Engine *engine = engine_find(def->engine_name);
-	/* init space engine instance */
-	space->handler = engine->createSpace(key_list, fields, field_count,
-					     index_count,
-					     def->exact_field_count);
+	space->def = space_def_dup_xc(def);
+	/* Construct a tuple format for the new space. */
+	uint32_t key_no = 0;
+	struct key_def **keys = (struct key_def **)
+		region_alloc_xc(&fiber()->gc, sizeof(*keys) * index_count);
+	rlist_foreach_entry(index_def, key_list, link)
+		keys[key_no++] = index_def->key_def;
+	space->format = engine->createFormat(keys, index_count,
+		def->fields, def->field_count, def->exact_field_count);
+	if (space->format != NULL)
+		tuple_format_ref(space->format);
+	/** Initialize index map. */
+	space->index_map = (Index **)calloc(index_count + index_id_max + 1,
+					    sizeof(Index *));
+	if (space->index_map == NULL) {
+		tnt_raise(OutOfMemory, (index_id_max + 1) * sizeof(Index *),
+			  "malloc", "index_map");
+	}
+	space->index = space->index_map + index_id_max + 1;
 	rlist_foreach_entry(index_def, key_list, link) {
 		space->index_map[index_def->iid] =
-			space->handler->createIndex(space, index_def);
+			space->vtab->create_index(space, index_def);
 	}
 	space_fill_index_map(space);
 	space->run_triggers = true;
@@ -127,18 +133,19 @@ space_new(struct space_def *def, struct rlist *key_list,
 void
 space_delete(struct space *space)
 {
-	for (uint32_t j = 0; j <= space->index_id_max; j++) {
+	for (uint32_t j = 0; space->index_map != NULL &&
+			     j <= space->index_id_max; j++) {
 		Index *index = space->index_map[j];
 		if (index)
 			delete index;
 	}
-	if (space->handler)
-		delete space->handler;
-
+	free(space->index_map);
+	if (space->format != NULL)
+		tuple_format_unref(space->format);
 	trigger_destroy(&space->on_replace);
 	trigger_destroy(&space->on_stmt_begin);
 	space_def_delete(space->def);
-	free(space);
+	space->vtab->destroy(space);
 }
 
 /** Do nothing if the space is already recovered. */
@@ -187,9 +194,9 @@ space_run_triggers(struct space *space, bool yesno)
 }
 
 size_t
-space_bsize(const struct space *space)
+space_bsize(struct space *space)
 {
-	return space->handler->bsize();
+	return space->vtab->bsize(space);
 }
 
 struct index_def *
@@ -207,4 +214,38 @@ index_name_by_id(struct space *space, uint32_t id)
 	return NULL;
 }
 
-/* vim: set fm=marker */
+void
+generic_space_execute_select(struct space *space, struct txn *txn,
+			     uint32_t index_id, uint32_t iterator,
+			     uint32_t offset, uint32_t limit,
+			     const char *key, const char *key_end,
+			     struct port *port)
+{
+	(void)txn;
+	(void)key_end;
+
+	Index *index = index_find_xc(space, index_id);
+
+	uint32_t found = 0;
+	if (iterator >= iterator_type_MAX)
+		tnt_raise(IllegalParams, "Invalid iterator type");
+	enum iterator_type type = (enum iterator_type) iterator;
+
+	uint32_t part_count = key ? mp_decode_array(&key) : 0;
+	if (key_validate(index->index_def, type, key, part_count))
+		diag_raise();
+
+	struct iterator *it = index->allocIterator();
+	IteratorGuard guard(it);
+	index->initIterator(it, type, key, part_count);
+
+	struct tuple *tuple;
+	while (found < limit && (tuple = it->next(it)) != NULL) {
+		if (offset > 0) {
+			offset--;
+			continue;
+		}
+		port_add_tuple_xc(port, tuple);
+		found++;
+	}
+}

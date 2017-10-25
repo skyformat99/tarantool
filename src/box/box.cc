@@ -31,6 +31,8 @@
 #include "box/box.h"
 
 #include "trivia/config.h"
+
+#include "lua/utils.h" /* lua_hash() */
 #include "fiber_pool.h"
 #include <say.h>
 #include <scoped_guard.h>
@@ -182,6 +184,14 @@ request_handle_sequence(struct request *request, struct space *space)
 	assert(request->type == IPROTO_INSERT ||
 	       request->type == IPROTO_REPLACE);
 
+	/*
+	 * An automatically generated sequence inherits
+	 * privileges of the space it is used with.
+	 */
+	if (!seq->is_generated &&
+	    access_check_sequence(seq) != 0)
+		diag_raise();
+
 	struct Index *pk = space_index(space, 0);
 	if (unlikely(pk == NULL))
 		return;
@@ -269,14 +279,14 @@ process_rw(struct request *request, struct space *space, struct tuple **result)
 		case IPROTO_REPLACE:
 			if (space->sequence != NULL)
 				request_handle_sequence(request, space);
-			tuple = space->handler->executeReplace(txn, space,
-							       request);
+			tuple = space->vtab->execute_replace(space, txn,
+							     request);
 
 
 			break;
 		case IPROTO_UPDATE:
-			tuple = space->handler->executeUpdate(txn, space,
-							      request);
+			tuple = space->vtab->execute_update(space, txn,
+							    request);
 			if (tuple && request->index_id != 0) {
 				/*
 				 * XXX: this is going to break with
@@ -290,15 +300,15 @@ process_rw(struct request *request, struct space *space, struct tuple **result)
 			}
 			break;
 		case IPROTO_DELETE:
-			tuple = space->handler->executeDelete(txn, space,
-							      request);
+			tuple = space->vtab->execute_delete(space, txn,
+							    request);
 			if (tuple && request->index_id != 0) {
 				request_rebind_to_primary_key(request, space,
 							      tuple);
 			}
 			break;
 		case IPROTO_UPSERT:
-			space->handler->executeUpsert(txn, space, request);
+			space->vtab->execute_upsert(space, txn, request);
 			tuple = NULL;
 			break;
 		default:
@@ -443,7 +453,7 @@ apply_initial_join_row(struct xstream *stream, struct xrow_header *row)
 	struct request *request = xrow_decode_dml_gc_xc(row);
 	struct space *space = space_cache_find(request->space_id);
 	/* no access checks here - applier always works with admin privs */
-	space->handler->applyInitialJoinRow(space, request);
+	space->vtab->apply_initial_join_row(space, request);
 }
 
 /* {{{ configuration bindings */
@@ -889,8 +899,8 @@ box_select(struct port *port, uint32_t space_id, uint32_t index_id,
 		struct space *space = space_cache_find(space_id);
 		access_check_space(space, PRIV_R);
 		struct txn *txn = txn_begin_ro_stmt(space);
-		space->handler->executeSelect(txn, space, index_id, iterator,
-					      offset, limit, key, key_end, port);
+		space->vtab->execute_select(space, txn, index_id, iterator,
+					    offset, limit, key, key_end, port);
 		txn_commit_ro_stmt(txn);
 		return 0;
 	} catch (Exception *e) {
@@ -1047,8 +1057,15 @@ sequence_data_update(uint32_t seq_id, int64_t value)
 			 mp_encode_int(tuple_buf_end, value) :
 			 mp_encode_uint(tuple_buf_end, value));
 	assert(tuple_buf_end < tuple_buf + tuple_buf_size);
-	return box_replace(BOX_SEQUENCE_DATA_ID,
-			   tuple_buf, tuple_buf_end, NULL);
+
+	struct credentials *orig_credentials = current_user();
+	fiber_set_user(fiber(), &admin_credentials);
+
+	int rc = box_replace(BOX_SEQUENCE_DATA_ID,
+			     tuple_buf, tuple_buf_end, NULL);
+
+	fiber_set_user(fiber(), orig_credentials);
+	return rc;
 }
 
 /** Delete a record from _sequence_data space. */
@@ -1065,8 +1082,15 @@ sequence_data_delete(uint32_t seq_id)
 	key_buf_end = mp_encode_array(key_buf_end, 1);
 	key_buf_end = mp_encode_uint(key_buf_end, seq_id);
 	assert(key_buf_end < key_buf + key_buf_size);
-	return box_delete(BOX_SEQUENCE_DATA_ID, 0,
-			  key_buf, key_buf_end, NULL);
+
+	struct credentials *orig_credentials = current_user();
+	fiber_set_user(fiber(), &admin_credentials);
+
+	int rc = box_delete(BOX_SEQUENCE_DATA_ID, 0,
+			    key_buf, key_buf_end, NULL);
+
+	fiber_set_user(fiber(), orig_credentials);
+	return rc;
 }
 
 int
@@ -1074,6 +1098,8 @@ box_sequence_next(uint32_t seq_id, int64_t *result)
 {
 	struct sequence *seq = sequence_cache_find(seq_id);
 	if (seq == NULL)
+		return -1;
+	if (access_check_sequence(seq) != 0)
 		return -1;
 	int64_t value;
 	if (sequence_next(seq, &value) != 0)
@@ -1089,6 +1115,8 @@ box_sequence_set(uint32_t seq_id, int64_t value)
 	struct sequence *seq = sequence_cache_find(seq_id);
 	if (seq == NULL)
 		return -1;
+	if (access_check_sequence(seq) != 0)
+		return -1;
 	if (sequence_set(seq, value) != 0)
 		return -1;
 	return sequence_data_update(seq_id, value);
@@ -1099,6 +1127,8 @@ box_sequence_reset(uint32_t seq_id)
 {
 	struct sequence *seq = sequence_cache_find(seq_id);
 	if (seq == NULL)
+		return -1;
+	if (access_check_sequence(seq) != 0)
 		return -1;
 	sequence_reset(seq);
 	return sequence_data_delete(seq_id);
@@ -1579,7 +1609,7 @@ box_init(void)
 	 */
 	session_init();
 
-	if (tuple_init() != 0)
+	if (tuple_init(lua_hash) != 0)
 		diag_raise();
 
 	sequence_init();

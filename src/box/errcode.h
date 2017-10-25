@@ -200,6 +200,10 @@ struct errcode_record {
 	/*145 */_(ER_NO_SUCH_SEQUENCE,		"Sequence '%s' does not exist") \
 	/*146 */_(ER_SEQUENCE_EXISTS,		"Sequence '%s' already exists") \
 	/*147 */_(ER_SEQUENCE_OVERFLOW,		"Sequence '%s' has overflowed") \
+	/*148 */_(ER_SEQUENCE_ACCESS_DENIED,	"%s access is denied for user '%s' to sequence '%s'") \
+	/*149 */_(ER_SPACE_FIELD_IS_DUPLICATE,	"Space field '%s' is duplicate") \
+	/*150 */_(ER_CANT_CREATE_COLLATION,	"Failed to initialize collation: %s.") \
+	/*151 */_(ER_WRONG_COLLATION_OPTIONS,	"Wrong collation options (field %u): %s") \
 
 /*
  * !IMPORTANT! Please follow instructions at start of the file

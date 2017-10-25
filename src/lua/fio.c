@@ -697,12 +697,8 @@ lbox_fio_copyfile(struct lua_State *L)
 {
 	const char *source = lua_tostring(L, -2);
 	const char *dest = lua_tostring(L, -1);
-	assert(source && dest);
-	if (coio_copyfile(source, dest) >= 0) {
-		lua_pushboolean(L, 1);
-	} else {
-		lua_pushboolean(L, 0);
-	}
+	assert(source != NULL && dest != NULL);
+	lua_pushboolean(L, coio_copyfile(source, dest) == 0);
 	return 1;
 }
 

@@ -68,6 +68,8 @@ enum {
 	BOX_SYSTEM_ID_MIN = 256,
 	/** Space id of _schema. */
 	BOX_SCHEMA_ID = 272,
+	/** Space id of _collation. */
+	BOX_COLLATION_ID = 276,
 	/** Space id of _space. */
 	BOX_SPACE_ID = 280,
 	/** Space id of _vspace view. */
@@ -155,6 +157,16 @@ enum {
 	BOX_FUNC_FIELD_LANGUAGE = 4,
 };
 
+/** _collation fields. */
+enum {
+	BOX_COLLATION_FIELD_ID = 0,
+	BOX_COLLATION_FIELD_NAME = 1,
+	BOX_COLLATION_FIELD_UID = 2,
+	BOX_COLLATION_FIELD_TYPE = 3,
+	BOX_COLLATION_FIELD_LOCALE = 4,
+	BOX_COLLATION_FIELD_OPTIONS = 5,
+};
+
 /** _schema fields. */
 enum {
 	BOX_SCHEMA_FIELD_KEY = 0,
@@ -206,8 +218,15 @@ enum {
  * even when there are more object types in the future.
  */
 enum schema_object_type {
-	SC_UNKNOWN = 0, SC_UNIVERSE = 1, SC_SPACE = 2, SC_FUNCTION = 3,
-	SC_USER = 4, SC_ROLE = 5
+	SC_UNKNOWN = 0,
+	SC_UNIVERSE = 1,
+	SC_SPACE = 2,
+	SC_FUNCTION = 3,
+	SC_USER = 4,
+	SC_ROLE = 5,
+	SC_SEQUENCE = 6,
+	SC_COLLATION = 7,
+	schema_object_type_MAX = 8
 };
 
 enum schema_object_type
@@ -222,7 +241,7 @@ schema_object_name(enum schema_object_type type);
  * Result is locale-dependent.
  */
 bool
-identifier_is_valid(const char *str);
+identifier_is_valid(const char *str, uint32_t len);
 
 #if defined(__cplusplus)
 } /* extern "C" */
@@ -233,10 +252,10 @@ identifier_is_valid(const char *str);
  * Throw an error if identifier is not valid.
  */
 static inline void
-identifier_check_xc(const char *str)
+identifier_check_xc(const char *str, uint32_t len)
 {
-	if (! identifier_is_valid(str))
-		tnt_raise(ClientError, ER_IDENTIFIER, str);
+	if (! identifier_is_valid(str, len))
+		tnt_raise(ClientError, ER_IDENTIFIER, tt_cstr(str, len));
 }
 
 #endif /* defined(__cplusplus) */
