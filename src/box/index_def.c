@@ -86,10 +86,18 @@ index_def_new(uint32_t space_id, uint32_t iid, const char *name,
 		return NULL;
 	}
 	def->key_def = key_def_dup(key_def);
-	if (pk_def)
+	if (pk_def != NULL) {
 		def->cmp_def = key_def_merge(key_def, pk_def);
-	else
+		if (! opts->is_unique) {
+			def->cmp_def->unique_part_count =
+				def->cmp_def->part_count;
+		} else {
+			def->cmp_def->unique_part_count =
+				def->key_def->part_count;
+		}
+	} else {
 		def->cmp_def = key_def_dup(key_def);
+	}
 	if (def->key_def == NULL || def->cmp_def == NULL) {
 		index_def_delete(def);
 		return NULL;
@@ -165,16 +173,16 @@ index_def_delete(struct index_def *index_def)
 }
 
 bool
-index_def_change_requires_rebuild(struct index_def *old_index_def,
-				  struct index_def *new_index_def)
+index_def_change_requires_rebuild(const struct index_def *old_index_def,
+				  const struct index_def *new_index_def)
 {
 	if (old_index_def->iid != new_index_def->iid ||
 	    old_index_def->type != new_index_def->type ||
 	    old_index_def->opts.is_unique != new_index_def->opts.is_unique ||
-	    key_part_cmp(old_index_def->key_def->parts,
-			 old_index_def->key_def->part_count,
-			 new_index_def->key_def->parts,
-			 new_index_def->key_def->part_count) != 0) {
+	    !key_part_check_compatibility(old_index_def->key_def->parts,
+					  old_index_def->key_def->part_count,
+					  new_index_def->key_def->parts,
+					  new_index_def->key_def->part_count)) {
 		return true;
 	}
 	if (old_index_def->type == RTREE) {

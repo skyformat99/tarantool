@@ -303,7 +303,8 @@ pk = space:create_index('pk', {parts={{field = 0, type = 'unsigned'}}})
 ...
 pk = space:create_index('pk', {parts={{field = 1, type = 'const char *'}}})
 ---
-- error: 'Wrong index options (field 1): index part: unknown field type'
+- error: 'Wrong index parts: unknown field type; expected field1 id (number), field1
+    type (string), ...'
 ...
 pk = space:create_index('pk', {parts={{field = 1, type = 'unsigned'}}})
 ---
@@ -311,6 +312,7 @@ pk = space:create_index('pk', {parts={{field = 1, type = 'unsigned'}}})
 pk.parts
 ---
 - - type: unsigned
+    is_nullable: false
     fieldno: 1
 ...
 pk:drop()
@@ -322,6 +324,7 @@ pk = space:create_index('pk', {parts={{1, 'unsigned'}}})
 pk.parts
 ---
 - - type: unsigned
+    is_nullable: false
     fieldno: 1
 ...
 pk:drop()
@@ -333,6 +336,7 @@ pk = space:create_index('pk', {parts={{1, type='unsigned'}}})
 pk.parts
 ---
 - - type: unsigned
+    is_nullable: false
     fieldno: 1
 ...
 space:insert{1, 2, 3}

@@ -63,7 +63,7 @@ static intptr_t recycled_format_ids = FORMAT_ID_NIL;
 static uint32_t formats_size = 0, formats_capacity = 0;
 
 static const struct tuple_field tuple_field_default = {
-	FIELD_TYPE_ANY, TUPLE_OFFSET_SLOT_NIL, false, NULL,
+	FIELD_TYPE_ANY, TUPLE_OFFSET_SLOT_NIL, false, NULL, false,
 };
 
 /**
@@ -123,6 +123,7 @@ tuple_format_create(struct tuple_format *format, struct key_def * const *keys,
 		format->fields[i].is_key_part = false;
 		format->fields[i].type = fields[i].type;
 		format->fields[i].offset_slot = TUPLE_OFFSET_SLOT_NIL;
+		format->fields[i].is_nullable = fields[i].is_nullable;
 		format->fields[i].name = name_pos;
 		size_t len = strlen(fields[i].name);
 		memcpy(name_pos, fields[i].name, len);
@@ -148,6 +149,16 @@ tuple_format_create(struct tuple_format *format, struct key_def * const *keys,
 			assert(part->fieldno < format->field_count);
 			struct tuple_field *field =
 				&format->fields[part->fieldno];
+			if (part->fieldno >= field_count) {
+				field->is_nullable = part->is_nullable;
+			} else if (field->is_nullable != part->is_nullable) {
+				diag_set(ClientError, ER_NULLABLE_MISMATCH,
+					 part->fieldno + TUPLE_INDEX_BASE,
+					 field->is_nullable ? "nullable" :
+					 "not nullable", part->is_nullable ?
+					 "nullable" : "not nullable");
+				return -1;
+			}
 
 			field->is_key_part = true;
 			if (field->type == FIELD_TYPE_ANY) {
@@ -353,6 +364,8 @@ tuple_format_eq(const struct tuple_format *a, const struct tuple_format *b)
 			return false;
 		if (a->fields[i].is_key_part != b->fields[i].is_key_part)
 			return false;
+		if (a->fields[i].is_nullable != b->fields[i].is_nullable)
+			return false;
 	}
 	return true;
 }
@@ -443,19 +456,23 @@ tuple_init_field_map(const struct tuple_format *format, uint32_t *field_map,
 
 	/* first field is simply accessible, so we do not store offset to it */
 	enum mp_type mp_type = mp_typeof(*pos);
-	if (key_mp_type_validate(format->fields[0].type, mp_type, ER_FIELD_TYPE,
-				 TUPLE_INDEX_BASE))
+	const struct tuple_field *field = &format->fields[0];
+	if (key_mp_type_validate(field->type, mp_type, ER_FIELD_TYPE,
+				 TUPLE_INDEX_BASE, field->is_nullable))
 		return -1;
 	mp_next(&pos);
 	/* other fields...*/
-	for (uint32_t i = 1; i < format->field_count; i++) {
+	++field;
+	for (uint32_t i = 1; i < format->field_count; i++, ++field) {
 		mp_type = mp_typeof(*pos);
-		if (key_mp_type_validate(format->fields[i].type, mp_type,
-					 ER_FIELD_TYPE, i + TUPLE_INDEX_BASE))
+		if (key_mp_type_validate(field->type, mp_type, ER_FIELD_TYPE,
+					 i + TUPLE_INDEX_BASE,
+					 field->is_nullable))
 			return -1;
-		if (format->fields[i].offset_slot != TUPLE_OFFSET_SLOT_NIL)
-			field_map[format->fields[i].offset_slot] =
+		if (field->offset_slot != TUPLE_OFFSET_SLOT_NIL) {
+			field_map[field->offset_slot] =
 				(uint32_t) (pos - tuple);
+		}
 		mp_next(&pos);
 	}
 	return 0;

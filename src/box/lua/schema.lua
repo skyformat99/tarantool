@@ -318,7 +318,7 @@ end
 
 function update_format(format)
     local result = {}
-    for i,given in pairs(format) do
+    for i, given in ipairs(format) do
         local field = {}
         if type(given) ~= "table" then
             field.name = given
@@ -502,9 +502,10 @@ local function update_index_parts(space_id, parts)
         "options.parts must have at least one part")
     end
     if type(parts[1]) == 'number' and type(parts[2]) == 'string' then
-        return update_index_parts_1_6_0(parts)
+        return update_index_parts_1_6_0(parts), true
     end
 
+    local parts_can_be_simplified = true
     local result = {}
     for i=1,#parts do
         local part = {}
@@ -513,9 +514,9 @@ local function update_index_parts(space_id, parts)
         else
             for k, v in pairs(parts[i]) do
                 -- Support {1, 'unsigned', collation='xx'} shortcut
-                if k == 1 then
+                if k == 1 or k == 'field' then
                     part.field = v;
-                elseif k == 2 then
+                elseif k == 2 or k == 'type' then
                     part.type = v;
                 elseif k == 'collation' then
                     -- find ID by name
@@ -525,8 +526,13 @@ local function update_index_parts(space_id, parts)
                             "options.parts[" .. i .. "]: collation was not found by name '" .. v .. "'")
                     end
                     part[k] = coll[1]
+                    parts_can_be_simplified = false
+                elseif k == 'is_nullable' then
+                    part[k] = v
+                    parts_can_be_simplified = false
                 else
                     part[k] = v
+                    parts_can_be_simplified = false
                 end
             end
         end
@@ -548,8 +554,8 @@ local function update_index_parts(space_id, parts)
             box.error(box.error.ILLEGAL_PARAMS,
                       "options.parts[" .. i .. "]: field (number) must be one-based")
         end
+        local fmt = box.space[space_id]:format()[part.field]
         if part.type == nil then
-            local fmt = box.space[space_id]:format()[part.field]
             if fmt and fmt.type then
                 part.type = fmt.type
             else
@@ -559,10 +565,33 @@ local function update_index_parts(space_id, parts)
             box.error(box.error.ILLEGAL_PARAMS,
                       "options.parts[" .. i .. "]: type (string) is expected")
         end
+        if part.is_nullable == nil then
+            if fmt and fmt.is_nullable then
+                part.is_nullable = true
+                parts_can_be_simplified = false
+            end
+        elseif type(part.is_nullable) ~= 'boolean' then
+            box.error(box.error.ILLEGAL_PARAMS,
+                      "options.parts[" .. i .. "]: type (boolean) is expected")
+        end
         part.field = part.field - 1
         table.insert(result, part)
     end
-    return result
+    return result, parts_can_be_simplified
+end
+
+--
+-- Convert index parts into 1.6.6 format if they
+-- doesn't use collation and is_nullable options
+--
+local function simplify_index_parts(parts)
+    local new_parts = {}
+    for i, part in pairs(parts) do
+        assert(part.collation == nil and part.is_nullable == nil,
+               "part is simple")
+        new_parts[i] = {part.field, part.type}
+    end
+    return new_parts
 end
 
 -- Historically, some properties of an index
@@ -656,7 +685,8 @@ box.schema.index.create = function(space_id, name, options)
             end
         end
     end
-    local parts = update_index_parts(space_id, options.parts)
+    local parts, parts_can_be_simplified =
+        update_index_parts(space_id, options.parts)
     -- create_index() options contains type, parts, etc,
     -- stored separately. Remove these members from index_opts
     local index_opts = {
@@ -708,6 +738,10 @@ box.schema.index.create = function(space_id, name, options)
                 box.error(box.error.NO_SUCH_SEQUENCE, options.sequence)
             end
         end
+    end
+    -- save parts in old format if possible
+    if parts_can_be_simplified then
+        parts = simplify_index_parts(parts)
     end
     _index:insert{space_id, iid, name, options.type, index_opts, parts}
     if sequence ~= nil then
@@ -815,21 +849,32 @@ box.schema.index.alter = function(space_id, index_id, options)
             index_opts[k] = options[k]
         end
     end
-    if options.parts ~= nil then
-        parts = update_index_parts(space_id, options.parts)
+    if options.parts then
+        local parts_can_be_simplified
+        parts, parts_can_be_simplified =
+            update_index_parts(space_id, options.parts)
+        -- save parts in old format if possible
+        if parts_can_be_simplified then
+            parts = simplify_index_parts(parts)
+        end
     end
     local _space_sequence = box.space[box.schema.SPACE_SEQUENCE_ID]
     local sequence_is_generated = false
     local sequence = options.sequence
-    local sequence_tuple = _space_sequence:get(space_id)
-    if sequence or (sequence ~= false and sequence_tuple ~= nil) then
-        if index_id ~= 0 then
+    local sequence_tuple
+    if index_id ~= 0 then
+        if sequence then
             box.error(box.error.MODIFY_INDEX,
                       options.name, box.space[space_id].name,
                       "sequence cannot be used with a secondary key")
         end
-        if #parts >= 1 and parts[1].type ~= 'integer' and
-                           parts[1].type  ~= 'unsigned' then
+        -- ignore 'sequence = false' for secondary indexes
+        sequence = nil
+    else
+        sequence_tuple = _space_sequence:get(space_id)
+        if (sequence or (sequence ~= false and sequence_tuple ~= nil)) and
+           #parts >= 1 and (parts[1].type or parts[1][2]) ~= 'integer' and
+                           (parts[1].type or parts[1][2]) ~= 'unsigned' then
             box.error(box.error.MODIFY_INDEX,
                       options.name, box.space[space_id].name,
                       "sequence cannot be used with a non-integer key")

@@ -56,20 +56,19 @@ add_library(box STATIC
     index.cc
     index_def.c
     iterator_type.c
-    memtx_index.cc
-    memtx_hash.cc
-    memtx_tree.cc
-    memtx_rtree.cc
-    memtx_bitset.cc
-    engine.cc
-    memtx_engine.cc
-    memtx_space.cc
+    memtx_hash.c
+    memtx_tree.c
+    memtx_rtree.c
+    memtx_bitset.c
+    engine.c
+    memtx_engine.c
+    memtx_space.c
     memtx_tuple.cc
-    sysview_engine.cc
-    sysview_index.cc
-    vinyl_engine.cc
-    vinyl_space.cc
-    vinyl_index.cc
+    sysview_engine.c
+    sysview_index.c
+    vinyl_engine.c
+    vinyl_space.c
+    vinyl_index.c
     vinyl.c
     vy_stmt.c
     vy_mem.c
@@ -84,7 +83,7 @@ add_library(box STATIC
     vy_log.c
     vy_upsert.c
     vy_read_set.c
-    space.cc
+    space.c
     space_def.c
     sequence.c
     func.c
@@ -94,7 +93,7 @@ add_library(box STATIC
     schema_def.c
     session.cc
     port.c
-    txn.cc
+    txn.c
     box.cc
     gc.c
     checkpoint.cc

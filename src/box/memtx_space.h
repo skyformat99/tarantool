@@ -32,6 +32,12 @@
  */
 #include "space.h"
 
+#if defined(__cplusplus)
+extern "C" {
+#endif /* defined(__cplusplus) */
+
+struct memtx_engine;
+
 struct memtx_space {
 	struct space base;
 	/* Number of bytes used in memory by tuples in the space. */
@@ -40,8 +46,8 @@ struct memtx_space {
 	 * A pointer to replace function, set to different values
 	 * at different stages of recovery.
 	 */
-	void (*replace)(struct space *, struct txn_stmt *,
-			enum dup_replace_mode);
+	int (*replace)(struct space *, struct txn_stmt *,
+		       enum dup_replace_mode);
 };
 
 /**
@@ -58,19 +64,25 @@ memtx_space_update_bsize(struct space *space,
 			 const struct tuple *old_tuple,
 			 const struct tuple *new_tuple);
 
-void
+int
 memtx_space_replace_no_keys(struct space *, struct txn_stmt *,
 			    enum dup_replace_mode);
-void
+int
 memtx_space_replace_build_next(struct space *, struct txn_stmt *,
 			       enum dup_replace_mode);
-void
+int
 memtx_space_replace_primary_key(struct space *, struct txn_stmt *,
 				enum dup_replace_mode);
-void
+int
 memtx_space_replace_all_keys(struct space *, struct txn_stmt *,
 			     enum dup_replace_mode);
 
-extern const struct space_vtab memtx_space_vtab;
+struct space *
+memtx_space_new(struct memtx_engine *memtx,
+		struct space_def *def, struct rlist *key_list);
+
+#if defined(__cplusplus)
+} /* extern "C" */
+#endif /* defined(__cplusplus) */
 
 #endif /* TARANTOOL_BOX_MEMTX_SPACE_H_INCLUDED */
