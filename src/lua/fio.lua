@@ -336,18 +336,10 @@ fio.rmtree = function(path)
 end
 
 fio.copyfile = function(from, to)
-    if not from then
-        return false
+    if type(from) ~= 'string' or type(to) ~= 'string' then
+        error('Usage: fio.copyfile(from, to)')
     end
-    from = tostring(from)
-    local st = fio.lstat(from)
-    -- check if arg "to" is a file
-    if not st or not st:is_reg() then
-        return false
-    end
-
-    to = tostring(to)
-    st = fio.stat(to)
+    local st = fio.stat(to)
     if st and st:is_dir() then
         to = fio.pathjoin(to, fio.basename(from))
     end
@@ -355,48 +347,47 @@ fio.copyfile = function(from, to)
 end
 
 fio.copytree = function(from, to)
-    if from == nil or to == nil then
-        return false
+    if type(from) ~= 'string' or type(to) ~= 'string' then
+        error('Usage: fio.copytree(from, to)')
     end
-    from = tostring(from)
+    local status, reason
     from = fio.abspath(from)
-    if not from then
-        return false
-    end
     local st = fio.stat(from)
     if st == nil or not st:is_dir() then
-        return false
+        return false, errno.strerror(errno.ENOTDIR)
     end
     local ls = fio.listdir(from)
-    to = tostring(to)
     to = fio.abspath(to)
 
     -- create tree of destination
-    if not fio.mktree(to) then
-        return false
+    local status, reason = fio.mktree(to)
+    if not status then
+        return status, reason
     end
     for i, f in ipairs(ls) do
         local ffrom = fio.pathjoin(from, f)
         local fto = fio.pathjoin(to, f)
         local st = fio.lstat(ffrom)
         if st:is_dir() then
-            if not fio.copytree(ffrom, fto) then
-                return false
+            status, reason = fio.copytree(ffrom, fto)
+            if not status then
+                return status, reason
             end
         end
         if st:is_reg() then
-            if not fio.copyfile(ffrom, fto) then
-                return false
+            status, reason = fio.copyfile(ffrom, fto)
+            if not status then
+                return status, reason
             end
         end
         if st:is_link() then
-            local link_to = fio.readlink(ffrom)
+            link_to, reason = fio.readlink(ffrom)
             if not link_to then
-                return false
+                return status, reason
             end
-            if not fio.symlink(link_to, fto) then
-                print("can't create symlink in place of existing file " .. fto)
-                return false
+            status, reason = fio.symlink(link_to, fto)
+            if not status then
+                return nil, "can't create symlink in place of existing file "..fto
             end
         end
     end

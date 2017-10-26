@@ -32,11 +32,10 @@
 #include "coio_task.h"
 #include "fiber.h"
 #include "say.h"
+#include "fio.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
-
-enum { COPY_FILE_BUF_SIZE = 1024 };
 
 /**
  * A context of libeio request for any
@@ -519,7 +518,8 @@ coio_do_readdir(eio_req *req)
 	req->result = 0;
 	do {
 		entry = readdir(dirp);
-		if (entry == NULL || strcmp(entry->d_name, ".") == 0 ||
+		if (entry == NULL ||
+		    strcmp(entry->d_name, ".") == 0 ||
 		    strcmp(entry->d_name, "..") == 0)
 			continue;
 
@@ -539,10 +539,12 @@ coio_do_readdir(eio_req *req)
 		buf[len++] = '\n';
 		req->result++;
 	} while(entry != NULL);
+
 	if (len > 0)
 		buf[len - 1] = 0;
 	else
 		buf[0] = 0;
+
 	*eio->readdir.bufp = buf;
 	closedir(dirp);
 	return;
@@ -556,7 +558,8 @@ error:
 }
 
 int
-coio_readdir(const char *dir_path, char **buf) {
+coio_readdir(const char *dir_path, char **buf)
+{
 	INIT_COEIO_FILE(eio)
 	eio.readdir.bufp = buf;
 	eio.readdir.pathname = dir_path;
@@ -574,50 +577,53 @@ coio_do_copyfile(eio_req *req)
 		goto error;
 
 	int source_fd = open(eio->copyfile.source, O_RDONLY);
-	if (source_fd < 0)
-		goto error;
+	if (source_fd < 0) {
+		req->errorno = errno;
+		req->result = -1;
+		return -1;
+	}
 
 	int dest_fd = open(eio->copyfile.dest, O_WRONLY | O_CREAT,
 			   st.st_mode & 0777);
-	if (dest_fd < 0)
-		goto dst_fd_error;
-
-	char buf[COPY_FILE_BUF_SIZE];
-	ssize_t nread;
-	nread = read(source_fd, buf, sizeof(buf));
-	while (nread > 0) {
-		char *out_ptr = buf;
-		ssize_t nwritten;
-
-		do {
-			nwritten = write(dest_fd, out_ptr, nread);
-
-			if (nwritten >= 0) {
-				nread -= nwritten;
-				out_ptr += nwritten;
-			} else if (errno != EINTR) {
-				goto write_error;
-			}
-		} while (nread > 0);
-		nread = read(source_fd, buf, sizeof(buf));
-	}
-	if (nread == 0) {
-		req->result = 0;
-		close(source_fd);
-		close(dest_fd);
+	if (dest_fd < 0) {
+		req->errorno = errno;
+		req->result = -1;
+		close(src_fd);
 		return;
 	}
-write_error:
-	close(dest_fd);
-dst_fd_error:
+
+	enum { COPY_FILE_BUF_SIZE = 4096 };
+
+	char buf[COPY_FILE_BUF_SIZE];
+
+	while (true) {
+		ssize_t nread = fio_read(source_fd, buf, sizeof(buf));
+		if (nread < 0)
+			goto error_copy;
+
+		if (nread == 0)
+			break; /* eof */
+
+		ssize_t nwritten = fio_writen(dest_fd, buf, nread);
+		if (nwritten < 0)
+			goto error_copy;
+	}
+	req->result = 0;
 	close(source_fd);
-error:
+	close(dest_fd);
+	return;
+
+error_copy:
 	req->errorno = errno;
 	req->result = -1;
+	close(dest_fd);
+	close(source_fd);
+	return;
 }
 
 int
-coio_copyfile(const char *source, const char *dest) {
+coio_copyfile(const char *source, const char *dest)
+{
 	INIT_COEIO_FILE(eio)
 	eio.copyfile.source = source;
 	eio.copyfile.dest = dest;
