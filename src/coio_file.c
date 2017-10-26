@@ -522,8 +522,8 @@ coio_do_readdir(eio_req *req)
 		    strcmp(entry->d_name, ".") == 0 ||
 		    strcmp(entry->d_name, "..") == 0)
 			continue;
-
-		size_t needed = len + entry->d_namlen + 1;
+		size_t namlen = strlen(entry->d_name);
+		size_t needed = len + namlen + 1;
 		if (needed > capacity) {
 			if (needed <= capacity * 2)
 				capacity *= 2;
@@ -534,8 +534,8 @@ coio_do_readdir(eio_req *req)
 				goto mem_error;
 			buf = new_buf;
 		}
-		memcpy(&buf[len], entry->d_name, entry->d_namlen);
-		len += entry->d_namlen;
+		memcpy(&buf[len], entry->d_name, namlen);
+		len += namlen;
 		buf[len++] = '\n';
 		req->result++;
 	} while(entry != NULL);
@@ -574,13 +574,13 @@ coio_do_copyfile(eio_req *req)
 
 	struct stat st;
 	if (stat(eio->copyfile.source, &st) < 0)
-		goto error;
+		goto error_copy;
 
 	int source_fd = open(eio->copyfile.source, O_RDONLY);
 	if (source_fd < 0) {
 		req->errorno = errno;
 		req->result = -1;
-		return -1;
+		return;
 	}
 
 	int dest_fd = open(eio->copyfile.dest, O_WRONLY | O_CREAT,
@@ -588,7 +588,7 @@ coio_do_copyfile(eio_req *req)
 	if (dest_fd < 0) {
 		req->errorno = errno;
 		req->result = -1;
-		close(src_fd);
+		close(source_fd);
 		return;
 	}
 
