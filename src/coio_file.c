@@ -573,23 +573,19 @@ coio_do_copyfile(eio_req *req)
 	struct coio_file_task *eio = (struct coio_file_task *)req->data;
 
 	struct stat st;
-	if (stat(eio->copyfile.source, &st) < 0)
-		goto error_copy;
+	if (stat(eio->copyfile.source, &st) < 0) {
+		goto error;
+	}
 
 	int source_fd = open(eio->copyfile.source, O_RDONLY);
 	if (source_fd < 0) {
-		req->errorno = errno;
-		req->result = -1;
-		return;
+		goto error;
 	}
 
 	int dest_fd = open(eio->copyfile.dest, O_WRONLY | O_CREAT,
 			   st.st_mode & 0777);
 	if (dest_fd < 0) {
-		req->errorno = errno;
-		req->result = -1;
-		close(source_fd);
-		return;
+		goto error_dest;
 	}
 
 	enum { COPY_FILE_BUF_SIZE = 4096 };
@@ -614,10 +610,12 @@ coio_do_copyfile(eio_req *req)
 	return;
 
 error_copy:
+	close(dest_fd);
+error_dest:
+	close(source_fd);
+error:
 	req->errorno = errno;
 	req->result = -1;
-	close(dest_fd);
-	close(source_fd);
 	return;
 }
 

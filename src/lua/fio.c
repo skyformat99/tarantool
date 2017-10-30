@@ -216,6 +216,7 @@ lbox_fio_write(struct lua_State *L)
 	if (res < 0) {
 		lua_pushnil(L);
 		lua_pushstring(L, strerror(errno));
+		return 2;
 	}
 	lua_pushinteger(L, res);
 	return 1;
