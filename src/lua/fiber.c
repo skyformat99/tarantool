@@ -245,6 +245,9 @@ lbox_fiber_statof(struct fiber *f, void *cb_ctx)
 static int
 lbox_fiber_info(struct lua_State *L)
 {
+#ifdef ENABLE_BACKTRACE
+	backtrace_proc_cache_clear();
+#endif /* ENABLE_BACKTRACE */
 	lua_newtable(L);
 	fiber_stat(lbox_fiber_statof, L);
 	lua_createtable(L, 0, 1);
