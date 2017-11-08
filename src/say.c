@@ -675,10 +675,9 @@ say_logger_boot(int level, const char *filename, int line, const char *error,
 		const char *format, ...)
 {
 	assert(logger_type == SAY_LOGGER_BOOT);
+	(void) level;
 	(void) filename;
 	(void) line;
-	if (!say_log_level_is_enabled(level))
-		return;
 
 	int errsv = errno; /* Preserve the errno. */
 	va_list ap;
@@ -700,8 +699,6 @@ say_logger_file(int level, const char *filename, int line, const char *error,
 	assert(logger_type == SAY_LOGGER_FILE ||
 	       logger_type == SAY_LOGGER_PIPE ||
 	       logger_type == SAY_LOGGER_STDERR);
-	if (!say_log_level_is_enabled(level))
-		return;
 
 	int errsv = errno; /* Preserve the errno. */
 	va_list ap;
@@ -739,9 +736,6 @@ say_logger_syslog(int level, const char *filename, int line, const char *error,
 		  const char *format, ...)
 {
 	assert(logger_type == SAY_LOGGER_SYSLOG);
-
-	if (!say_log_level_is_enabled(level))
-		return;
 
 	int errsv = errno; /* Preserve the errno. */
 	va_list ap;
