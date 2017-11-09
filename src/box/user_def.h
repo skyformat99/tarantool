@@ -129,6 +129,8 @@ struct user_def {
 	enum schema_object_type type;
 	/** User password - hash2 */
 	char hash2[SCRAMBLE_SIZE];
+	/** True if this user is blocked */
+	bool blocked;
 	/** User name - for error messages and debugging */
 	char name[0];
 };

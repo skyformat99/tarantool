@@ -153,6 +153,9 @@ lbox_session_su(struct lua_State *L)
 	}
 	if (user == NULL)
 		luaT_error(L);
+	if (user->def->blocked) {
+		luaL_error(L, "session.su(): user %s is blocked", user->def->name);
+	}
 	if (top == 1) {
 		credentials_init(&session->credentials, user->auth_token,
 				 user->def->uid);

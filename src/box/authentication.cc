@@ -44,6 +44,10 @@ authenticate(const char *user_name, uint32_t len,
 	uint32_t part_count;
 	uint32_t scramble_len;
 	const char *scramble;
+
+	if (user->def->blocked) {
+		tnt_raise(ClientError, ER_BLOCKED_USER, user->def->name);
+	}
 	/*
 	 * Allow authenticating back to GUEST user without
 	 * checking a password. This is useful for connection

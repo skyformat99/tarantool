@@ -481,6 +481,7 @@ user_cache_init()
 	memcpy(def->name, "guest", name_len);
 	def->owner = ADMIN;
 	def->type = SC_USER;
+	def->blocked = false;
 	struct user *user = user_cache_replace(def);
 	/* Now the user cache owns the def. */
 	guest_def_guard.is_active = false;
@@ -497,6 +498,7 @@ user_cache_init()
 	memcpy(def->name, "admin", name_len);
 	def->uid = def->owner = ADMIN;
 	def->type = SC_USER;
+	def->blocked = false;
 	user = user_cache_replace(def);
 	admin_def_guard.is_active = false;
 	/* ADMIN is both the auth token and user id for 'admin' user. */

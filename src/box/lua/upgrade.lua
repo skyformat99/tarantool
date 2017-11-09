@@ -332,6 +332,7 @@ local function upgrade_space_format_to_1_6_8()
         format[3] = {name='name', type='str'}
         format[4] = {name='type', type='str'}
         format[5] = {name='auth', type='*'}
+        format[6] = {name='block', type='*'}
         log.info("alter space _user set format")
         box.space._user:format(format)
     end
@@ -608,6 +609,7 @@ local function update_space_formats_to_1_7_5()
     format[3] = {name='name', type='string'}
     format[4] = {name='type', type='string'}
     format[5] = {name='auth', type='map'}
+    format[6] = {name='block', type='map'}
     box.space._user:format(format)
     box.space._vuser:format(format)
 

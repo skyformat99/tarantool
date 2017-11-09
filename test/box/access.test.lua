@@ -297,8 +297,9 @@ box.schema.func.drop(name)
 -- A test case for: http://bugs.launchpad.net/bugs/712456
 -- Verify that when trying to access a non-existing or
 -- very large space id, no crash occurs.
+remote = require('net.box')
 LISTEN = require('uri').parse(box.cfg.listen)
-c = (require 'net.box').connect(LISTEN.host, LISTEN.service)
+c = remote.connect(LISTEN.host, LISTEN.service)
 c:_request("select", nil, 1, box.index.EQ, 0, 0, 0xFFFFFFFF, {})
 c:_request("select", nil, 65537, box.index.EQ, 0, 0, 0xFFFFFFFF, {})
 c:_request("select", nil, 4294967295, box.index.EQ, 0, 0, 0xFFFFFFFF, {})
@@ -317,3 +318,34 @@ box.internal.collation.drop('test') -- fail
 session.su('admin')
 box.internal.collation.drop('test') -- success
 box.schema.user.drop('test')
+--
+-- Test block/unblock user
+--
+session.su("admin")
+box.schema.user.block('guest')
+box.schema.user.block(true)
+box.schema.user.block("nonexistent_user", true)
+box.schema.user.block('admin', true)
+box.schema.user.create('test', {password = 'test'})
+box.schema.user.grant('test', 'read,write', 'universe')
+session.su('test')
+box.schema.user.block("guest", true)
+s = box.schema.space.create('test_space')
+index = s:create_index('primary', {type = 'hash', parts = {1, 'unsigned'}})
+session.user()
+session.su("admin")
+box.schema.user.block('test', true)
+box.schema.user.blocked('test')
+session.su('test')
+session.user()
+c = remote.connect(LISTEN.host, LISTEN.service, {user = 'test', password = 'test'})
+c:is_connected()
+box.schema.user.block('test', false)
+c = remote.connect(LISTEN.host, LISTEN.service, {user = 'test', password = 'test'})
+c:is_connected()
+c:close()
+session.su('test')
+s:select{}
+s:drop()
+session.su("admin")
+box.schema.user.drop("test")

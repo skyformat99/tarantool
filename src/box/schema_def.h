@@ -137,6 +137,7 @@ enum {
 	BOX_USER_FIELD_NAME = 2,
 	BOX_USER_FIELD_TYPE = 3,
 	BOX_USER_FIELD_AUTH_MECH_LIST = 4,
+	BOX_USER_FIELD_BLOCK_MAP = 5,
 };
 
 /** _priv fields. */

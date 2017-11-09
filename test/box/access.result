@@ -134,7 +134,7 @@ box.schema.user.revoke('rich', 'public')
 ...
 box.space['_user']:delete{uid}
 ---
-- [5, 1, 'rich', 'user', {}]
+- [5, 1, 'rich', 'user', {}, {'blocked': false}]
 ...
 box.schema.user.drop('test')
 ---
@@ -398,7 +398,7 @@ box.schema.user.create('user1')
 ...
 box.space._user.index.name:select{'user1'}
 ---
-- - [4, 1, 'user1', 'user', {}]
+- - [4, 1, 'user1', 'user', {}, {'blocked': false}]
 ...
 session.su('user1')
 ---
@@ -411,14 +411,14 @@ session.su('admin')
 ...
 box.space._user.index.name:select{'user1'}
 ---
-- - [4, 1, 'user1', 'user', {'chap-sha1': 'CRO/LiziDOIb+xlhrxJNSSBFjl8='}]
+- - [4, 1, 'user1', 'user', {'chap-sha1': 'CRO/LiziDOIb+xlhrxJNSSBFjl8='}, {'blocked': false}]
 ...
 box.schema.user.passwd('user1', 'extra_new_password')
 ---
 ...
 box.space._user.index.name:select{'user1'}
 ---
-- - [4, 1, 'user1', 'user', {'chap-sha1': 'nMc3F1oaUtz37IYbgGYYPZawmfE='}]
+- - [4, 1, 'user1', 'user', {'chap-sha1': 'nMc3F1oaUtz37IYbgGYYPZawmfE='}, {'blocked': false}]
 ...
 box.schema.user.passwd('invalid_user', 'some_password')
 ---
@@ -759,10 +759,13 @@ box.schema.func.drop(name)
 -- A test case for: http://bugs.launchpad.net/bugs/712456
 -- Verify that when trying to access a non-existing or
 -- very large space id, no crash occurs.
+remote = require('net.box')
+---
+...
 LISTEN = require('uri').parse(box.cfg.listen)
 ---
 ...
-c = (require 'net.box').connect(LISTEN.host, LISTEN.service)
+c = remote.connect(LISTEN.host, LISTEN.service)
 ---
 ...
 c:_request("select", nil, 1, box.index.EQ, 0, 0, 0xFFFFFFFF, {})
@@ -818,5 +821,104 @@ box.internal.collation.drop('test') -- success
 ---
 ...
 box.schema.user.drop('test')
+---
+...
+--
+-- Test block/unblock user
+--
+session.su("admin")
+---
+...
+box.schema.user.block('guest')
+---
+- error: 'Usage: box.schema.user.block(user_name, val)'
+...
+box.schema.user.block(true)
+---
+- error: 'Usage: box.schema.user.block(user_name, val)'
+...
+box.schema.user.block("nonexistent_user", true)
+---
+- error: User 'nonexistent_user' is not found
+...
+box.schema.user.block('admin', true)
+---
+- error: 'builtin/box/schema.lua:1834: can''t block ''admin'''
+...
+box.schema.user.create('test', {password = 'test'})
+---
+...
+box.schema.user.grant('test', 'read,write', 'universe')
+---
+...
+session.su('test')
+---
+...
+box.schema.user.block("guest", true)
+---
+- error: Create, drop or alter access on user is denied for user 'test'
+...
+s = box.schema.space.create('test_space')
+---
+...
+index = s:create_index('primary', {type = 'hash', parts = {1, 'unsigned'}})
+---
+...
+session.user()
+---
+- test
+...
+session.su("admin")
+---
+...
+box.schema.user.block('test', true)
+---
+...
+box.schema.user.blocked('test')
+---
+- true
+...
+session.su('test')
+---
+- error: 'session.su(): user test is blocked'
+...
+session.user()
+---
+- admin
+...
+c = remote.connect(LISTEN.host, LISTEN.service, {user = 'test', password = 'test'})
+---
+...
+c:is_connected()
+---
+- false
+...
+box.schema.user.block('test', false)
+---
+...
+c = remote.connect(LISTEN.host, LISTEN.service, {user = 'test', password = 'test'})
+---
+...
+c:is_connected()
+---
+- true
+...
+c:close()
+---
+...
+session.su('test')
+---
+...
+s:select{}
+---
+- []
+...
+s:drop()
+---
+...
+session.su("admin")
+---
+...
+box.schema.user.drop("test")
 ---
 ...

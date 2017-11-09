@@ -1822,6 +1822,45 @@ user_def_fill_auth_data(struct user_def *user, const char *auth_data)
 	}
 }
 
+static void
+user_def_fill_block_data(struct user_def *user, const char *data)
+{
+	uint8_t type = mp_typeof(*data);
+	if (type == MP_ARRAY || type == MP_NIL) {
+		/*
+		 * Nothing useful.
+		 * MP_ARRAY is a special case since Lua arrays are
+		 * indistinguishable from tables, so an empty
+		 * table may well be encoded as an msgpack array.
+		 * Treat as no data.
+		 */
+		return;
+	}
+	if (mp_typeof(*data) != MP_MAP) {
+		/** Prevent users from making silly mistakes */
+		tnt_raise(ClientError, ER_CREATE_USER,
+				  user->name, "invalid blocking format, "
+						  "use box.schema.user.block() "
+						  "to set proper blocking");
+	}
+	uint32_t count = mp_decode_map(&data);
+	for (uint32_t i = 0; i < count; i++) {
+		if (mp_typeof(*data) != MP_STR) {
+			tnt_raise(ClientError, ER_CREATE_USER, user->name,
+					  "map block is not with string keys");
+		}
+		uint32_t len;
+		const char *name = mp_decode_str(&data, &len);
+		if (strncasecmp(name, "blocked", 7) != 0) {
+			mp_next(&data);
+			continue;
+		}
+
+		user->blocked = mp_decode_bool(&data);
+		break;
+	}
+}
+
 static struct user_def *
 user_def_new_from_tuple(struct tuple *tuple)
 {
@@ -1877,6 +1916,13 @@ user_def_new_from_tuple(struct tuple *tuple)
 				  "authentication data can not be set for a "\
 				  "role");
 		user_def_fill_auth_data(user, auth_data);
+	}
+
+	user->blocked = false;
+	if (tuple_field_count(tuple) > BOX_USER_FIELD_BLOCK_MAP) {
+		const char *block_data = tuple_field(tuple,
+											 BOX_USER_FIELD_BLOCK_MAP);
+		user_def_fill_block_data(user, block_data);
 	}
 	def_guard.is_active = false;
 	return user;

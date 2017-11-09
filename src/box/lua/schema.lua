@@ -1813,6 +1813,43 @@ box.schema.user.passwd = function(name, new_password)
     end
 end
 
+box.schema.user.block = function(name, val)
+    if type(name) ~= 'string' or val == nil then
+        box.error(box.error.PROC_LUA,
+            "Usage: box.schema.user.block(user_name, val)")
+    end
+    if type(val) == 'boolean' then
+        val = {blocked = val}
+    end
+
+    if type(val) ~= 'table' then
+        box.error(box.error.PROC_LUA,
+        "Usage: box.schema.user.block(user_name, val), wrong type of value")
+    end
+    local uid = user_resolve(name)
+    if uid == nil then
+        box.error(box.error.NO_SUCH_USER, name)
+    end
+    if name == 'admin' then
+        error("can't block 'admin'")
+    end
+    local _user = box.space[box.schema.USER_ID]
+    _user:update({uid}, {{"=", 6, val}})
+end
+
+box.schema.user.blocked = function(name)
+    if type(name) ~= 'string' then
+        box.error(box.error.PROC_LUA, "Usage: box.schema.user.blocked(user)")
+    end
+    local _user = box.space[box.schema.USER_ID]
+    local tuple = _user.index.name:get{name}
+    if tuple[6] ~= nil and tuple[6].blocked then
+        return true
+    else
+        return false
+    end
+end
+
 box.schema.user.create = function(name, opts)
     local uid = user_or_role_resolve(name)
     opts = opts or {}
@@ -1828,7 +1865,8 @@ box.schema.user.create = function(name, opts)
         auth_mech_list["chap-sha1"] = box.schema.user.password(opts.password)
     end
     local _user = box.space[box.schema.USER_ID]
-    uid = _user:auto_increment{session.uid(), name, 'user', auth_mech_list}[1]
+    uid = _user:auto_increment{session.uid(), name, 'user',
+        auth_mech_list, {blocked = false}}[1]
     -- grant role 'public' to the user
     box.schema.user.grant(uid, 'public')
 end

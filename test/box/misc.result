@@ -385,6 +385,7 @@ t;
   - 'box.error.CROSS_ENGINE_TRANSACTION : 81'
   - 'box.error.IDENTIFIER : 70'
   - 'box.error.injection : table: <address>
+  - 'box.error.UNKNOWN : 0'
   - 'box.error.NULLABLE_MISMATCH : 153'
   - 'box.error.NO_SUCH_ENGINE : 57'
   - 'box.error.COMMIT_IN_SUB_STMT : 122'
@@ -434,7 +435,7 @@ t;
   - 'box.error.COMPRESSION : 119'
   - 'box.error.SPACE_ACCESS_DENIED : 55'
   - 'box.error.SPLICE : 25'
-  - 'box.error.UNKNOWN : 0'
+  - 'box.error.BLOCKED_USER : 154'
   - 'box.error.NO_CONNECTION : 77'
   - 'box.error.DROP_PRIMARY_KEY : 17'
   - 'box.error.NULLABLE_PRIMARY : 152'
