@@ -315,9 +315,11 @@ applier_join(struct applier *applier)
 
 	/*
 	 * Tarantool < 1.7.0: there is no "final join" stage.
+	 * Proceed to "subscribe" and do not finish bootstrap
+	 * until replica id is received.
 	 */
 	if (applier->version_id < version_id(1, 7, 0))
-		goto finish;
+		return;
 
 	/*
 	 * Receive final data.
@@ -342,7 +344,6 @@ applier_join(struct applier *applier)
 				  (uint32_t) row.type);
 		}
 	}
-finish:
 	say_info("final data received");
 
 	applier_set_state(applier, APPLIER_JOINED);
@@ -365,7 +366,18 @@ applier_subscribe(struct applier *applier)
 	xrow_encode_subscribe_xc(&row, &REPLICASET_UUID, &INSTANCE_UUID,
 				 &replicaset_vclock);
 	coio_write_xrow(coio, &row);
-	applier_set_state(applier, APPLIER_FOLLOW);
+
+	if (applier->state == APPLIER_READY) {
+		applier_set_state(applier, APPLIER_FOLLOW);
+	} else {
+		/*
+		 * Tarantool < 1.7.0 sends replica id during
+		 * "subscribe" stage. We can't finish bootstrap
+		 * until it is received.
+		 */
+		assert(applier->state == APPLIER_FINAL_JOIN);
+		assert(applier->version_id < version_id(1, 7, 0));
+	}
 
 	/*
 	 * Read SUBSCRIBE response
@@ -401,6 +413,14 @@ applier_subscribe(struct applier *applier)
 	 * Process a stream of rows from the binary log.
 	 */
 	while (true) {
+		if (applier->state == APPLIER_FINAL_JOIN &&
+		    instance_id != REPLICA_ID_NIL) {
+			say_info("final data received");
+			applier_set_state(applier, APPLIER_JOINED);
+			applier_set_state(applier, APPLIER_READY);
+			applier_set_state(applier, APPLIER_FOLLOW);
+		}
+
 		coio_read_xrow(coio, &iobuf->in, &row);
 		applier->lag = ev_now(loop()) - row.tm;
 		applier->last_row_time = ev_monotonic_now(loop());
@@ -439,14 +459,15 @@ applier_subscribe(struct applier *applier)
 static inline void
 applier_disconnect(struct applier *applier, enum applier_state state)
 {
+	applier_set_state(applier, state);
 	if (applier->writer != NULL) {
 		fiber_cancel(applier->writer);
+		fiber_join(applier->writer);
 		applier->writer = NULL;
 	}
 
 	coio_close(loop(), &applier->io);
 	iobuf_reset(applier->iobuf);
-	applier_set_state(applier, state);
 	fiber_gc();
 }
 
@@ -505,11 +526,11 @@ applier_f(va_list ap)
 				/* Unrecoverable errors */
 				applier_log_error(applier, e);
 				applier_disconnect(applier, APPLIER_STOPPED);
-				throw;
+				return -1;
 			}
 		} catch (FiberIsCancelled *e) {
 			applier_disconnect(applier, APPLIER_OFF);
-			throw;
+			break;
 		} catch (SocketError *e) {
 			applier_log_error(applier, e);
 			goto reconnect;
