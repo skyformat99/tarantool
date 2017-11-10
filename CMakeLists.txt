@@ -156,7 +156,7 @@ endif()
 # directories.
 #
 if (EXISTS "${CMAKE_SOURCE_DIR}/.git" AND GIT)
-    execute_process (COMMAND ${GIT} describe --long HEAD
+    execute_process (COMMAND ${GIT} describe --long HEAD --match "1.8.*"
         OUTPUT_VARIABLE TARANTOOL_GIT_VERSION
         OUTPUT_STRIP_TRAILING_WHITESPACE
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

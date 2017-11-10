@@ -83,7 +83,10 @@ matrix:
         os: osx
 
 script:
-  - git tag -d 1.7.5
+  - export DESCRIBE=$(git describe --match "1.8.*")
+  - export VERSION=$(echo ${DESCRIBE} | sed -n 's/^\([0-9\.]*\)-\([0-9]*\)-\([a-z0-9]*\)/\1.\2/p')
+  - export RELEASE=1
+  - export ABBREV=$(echo ${DESCRIBE} | sed -n 's/^\([0-9\.]*\)-\([0-9]*\)-\([a-z0-9]*\)/\3/p')
   - make -f .travis.mk ${TARGET}
 
 before_deploy:
