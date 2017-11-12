@@ -148,34 +148,44 @@ int lbox_sql_create_function(struct lua_State *L)
 {
 	int argc = lua_gettop(L);
 	int func_arg_num = -1; // -1 is any arg num
+	int is_deterministic = 0;
 	const char *name;
 	struct lua_sql_func_info *func_info;
 	sqlite3 *db = sql_get();
 	/**
-	 * Check args. Two types are possible:
+	 * Check args. Three types are possible:
 	 * sql_create_function("func_name", func)
 	 * sql_create_function("func_name", func, func_arg_num)
+	 * sql_create_function("func_name", func, func_arg_num, is_deterministic)
 	 */
 	if (    !(argc == 2 && lua_isstring(L, 1) && lua_isfunction(L, 2)) &&
-		!(argc == 3 && lua_isstring(L, 1) && lua_isfunction(L, 2) &&
-			lua_isnumber(L, 3))){
-		luaL_error(L, "Invalid arguments");
+                !(argc == 3 && lua_isstring(L, 1) && lua_isfunction(L, 2) &&
+                        lua_isnumber(L, 3)) &&
+                !(argc == 4 && lua_isstring(L, 1) && lua_isfunction(L, 2) &&
+                        lua_isnumber(L, 3) && lua_isboolean(L, 4))) {
+		        luaL_error(L, "Invalid arguments");
 			return 0;
 	}
-	if (db == NULL){
+	if (db == NULL) {
 		luaL_error(L, "Please call box.cfg{} first");
 		return 0;
 	}
-	if (argc == 3){
+	if (argc == 3) {
 		func_arg_num = (int) lua_tonumber(L, 3);
 		// func should be on top of the stack because of luaL_ref api
 		lua_pop(L, 1);
 	}
+        if (argc == 4) {
+                if(lua_toboolean(L, 4))
+                        is_deterministic = SQLITE_DETERMINISTIC;
+                func_arg_num = (int) lua_tonumber(L, 3);
+                lua_pop(L, 2);
+        }
 	name = lua_tostring(L, 1);
 	func_info = (struct lua_sql_func_info*)malloc(sizeof(struct lua_sql_func_info));
 	func_info->func_ref = luaL_ref(L, LUA_REGISTRYINDEX);
 	sqlite3_create_function_v2(db, name, func_arg_num,
-				   SQLITE_UTF8, func_info,
+				   SQLITE_UTF8 | is_deterministic, func_info,
 				   lua_sql_call, NULL, NULL, lua_sql_destroy);
 	return 0;
 }
